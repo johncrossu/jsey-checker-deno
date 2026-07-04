@@ -2,8 +2,8 @@ const ETHERSCAN_KEY = Deno.env.get("ETHERSCAN_API_KEY") || "";
 const INTERNAL_KEY = Deno.env.get("INTERNAL_KEY") || "";
 const CHAIN_IDS: Record<string, string> = { ethereum: "1", bsc: "56", base: "8453", polygon: "137", arbitrum: "42161", optimism: "10", avalanche: "43114", celo: "42220", linea: "59144", zksync: "324" };
 const RPC_URLS: Record<string, string> = { "1": "https://ethereum-rpc.publicnode.com", "56": "https://bsc-dataseed.binance.org", "8453": "https://mainnet.base.org", "137": "https://polygon-rpc.com", "42161": "https://arb1.arbitrum.io/rpc", "10": "https://mainnet.optimism.io", "43114": "https://api.avax.network/ext/bc/C/rpc", "42220": "https://forno.celo.org", "59144": "https://rpc.linea.build", "324": "https://mainnet.era.zksync.io" };
-const tokenCache = new Map<string, { data: any; time: number }>();
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const kv = await Deno.openKv();
 
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type, x-internal-key", "Access-Control-Allow-Methods": "GET, POST, OPTIONS" };
 
@@ -24,12 +24,12 @@ async function rpcCall(rpcUrl: string, method: string, params: unknown[]) {
 }
 
 async function checkGoPlus(address: string, chainId: string) {
-  const cacheKey = chainId + ":" + address.toLowerCase();
-  const cached = tokenCache.get(cacheKey);
-  if (cached && Date.now() - cached.time < CACHE_TTL_MS) return cached.data;
+  const cacheKey = ["tokenrisk", chainId, address.toLowerCase()];
+  const cached = await kv.get(cacheKey);
+  if (cached && cached.versionstamp !== null) return cached.value;
   const data: any = await httpGetJson(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
   const result = data && data.result && data.result[address.toLowerCase()];
-  if (!result) { tokenCache.set(cacheKey, { data: null, time: Date.now() }); return null; }
+  if (!result) { await kv.set(cacheKey, null, { expireIn: CACHE_TTL_MS }); return null; }
   const parsed = {
     isHoneypot: result.is_honeypot === "1",
     lpLocked: result.lp_holders ? result.lp_holders.some((h: any) => h.is_locked === 1) : false,
@@ -38,7 +38,7 @@ async function checkGoPlus(address: string, chainId: string) {
     sellTax: result.sell_tax || "0",
     top10HoldersPercent: result.holders ? result.holders.slice(0, 10).reduce((s: number, h: any) => s + parseFloat(h.percent || 0), 0) : null,
   };
-  tokenCache.set(cacheKey, { data: parsed, time: Date.now() });
+  await kv.set(cacheKey, parsed, { expireIn: CACHE_TTL_MS });
   return parsed;
 }
 
