@@ -177,6 +177,19 @@ Deno.serve(async (req) => {
     return json({ wallet, chain, tokensChecked: uniqueTokens.length, approvalsFound: allApprovals.length, approvals: allApprovals });
   }
 
+  if (url.pathname === "/admin/clear-cache") {
+    if (req.headers.get("x-internal-key") !== INTERNAL_KEY || !INTERNAL_KEY) return json({ error: "Unauthorized" }, 401);
+    const chainId = url.searchParams.get("chain") || "";
+    if (!chainId) return json({ error: "Missing chain param" }, 400);
+    let deleted = 0;
+    const entries = kv.list({ prefix: ["tokenrisk", chainId] });
+    for await (const entry of entries) {
+      await kv.delete(entry.key);
+      deleted++;
+    }
+    return json({ chain: chainId, deleted });
+  }
+
   if (url.pathname === "/buy-sell-simulation") {
     return json({ error: "Not yet implemented — needs verified DEX router research before building." }, 501);
   }
