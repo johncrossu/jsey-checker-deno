@@ -150,6 +150,31 @@ Deno.serve(async (req) => {
     return json({ wallet, chain, tokensChecked: uniqueTokens.length, riskyCount: riskyTokens.length, riskyTokens: isPaid ? riskyTokens : undefined });
   }
 
+  if (url.pathname === "/wallet-approvals") {
+    const wallet = url.searchParams.get("wallet");
+    const chain = url.searchParams.get("chain") || "ethereum";
+    const chainId = CHAIN_IDS[chain] || "1";
+    if (!wallet) return json({ error: "Missing wallet" }, 400);
+    if (!isPaid) return json({ error: "Payment required for full approvals scan" }, 402);
+    if (!ETHERSCAN_KEY) return json({ error: "Not configured" });
+    const txData: any = await httpGetJson(`https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc&apikey=${ETHERSCAN_KEY}`);
+    const transfers = Array.isArray(txData?.result) ? txData.result : [];
+    const uniqueTokens = [...new Set(transfers.map((t: any) => t.contractAddress))].slice(0, 40) as string[];
+    const allApprovals: any[] = [];
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < uniqueTokens.length; i += BATCH_SIZE) {
+      const batch = uniqueTokens.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(batch.map((t) => getActiveApprovals(wallet, t, chainId)));
+      results.forEach((approvals, idx) => {
+        for (const a of approvals) {
+          allApprovals.push({ token: batch[idx], spender: a.spender, amountAtomic: a.amountAtomic, chain, chainId });
+        }
+      });
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    return json({ wallet, chain, tokensChecked: uniqueTokens.length, approvalsFound: allApprovals.length, approvals: allApprovals });
+  }
+
   if (url.pathname === "/buy-sell-simulation") {
     return json({ error: "Not yet implemented — needs verified DEX router research before building." }, 501);
   }
