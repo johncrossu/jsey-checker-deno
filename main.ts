@@ -86,19 +86,21 @@ async function checkDeployerHistory(address: string, chainId: string) {
 }
 
 async function getActiveApprovals(walletAddress: string, tokenAddress: string, chainId: string) {
-  const rpc = RPC_URLS[chainId];
-  if (!rpc) return [];
   const approvalTopic = "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925";
   const ownerTopic = "0x" + walletAddress.toLowerCase().replace("0x", "").padStart(64, "0");
-  const latestHex = await rpcCall(rpc, "eth_blockNumber", []);
-  const latest = parseInt(latestHex, 16);
-  const fromBlock = "0x" + Math.max(0, latest - 2000000).toString(16);
-  const logs = await rpcCall(rpc, "eth_getLogs", [{ address: tokenAddress, fromBlock, toBlock: "latest", topics: [approvalTopic, ownerTopic, null] }]);
-  if (!Array.isArray(logs)) return [];
+  const apiUrl = `https://api.etherscan.io/v2/api?chainid=${chainId}&module=logs&action=getLogs&address=${tokenAddress}&topic0=${approvalTopic}&topic1=${ownerTopic}&topic0_1_opr=and&fromBlock=0&toBlock=latest&apikey=${ETHERSCAN_KEY}`;
+  const data: any = await httpGetJson(apiUrl);
+  const logs = data && data.status === "1" && Array.isArray(data.result) ? data.result : [];
   const latestBySpender: Record<string, bigint> = {};
+  const blockBySpender: Record<string, number> = {};
   for (const log of logs) {
+    if (!log.topics || log.topics.length < 3) continue;
     const spender = "0x" + log.topics[2].slice(26);
-    latestBySpender[spender] = BigInt(log.data);
+    const blockNum = parseInt(log.blockNumber, 16);
+    if (!(spender in blockBySpender) || blockNum >= blockBySpender[spender]) {
+      blockBySpender[spender] = blockNum;
+      latestBySpender[spender] = BigInt(log.data);
+    }
   }
   return Object.entries(latestBySpender).filter(([, amt]) => amt > 0n).map(([spender, amt]) => ({ spender, amountAtomic: amt.toString() }));
 }
