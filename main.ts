@@ -4,6 +4,50 @@ const CHAIN_IDS: Record<string, string> = { ethereum: "1", bsc: "56", base: "845
 const RPC_URLS: Record<string, string> = { "1": "https://ethereum-rpc.publicnode.com", "56": "https://bsc-dataseed.binance.org", "8453": "https://mainnet.base.org", "137": "https://polygon-rpc.com", "42161": "https://arb1.arbitrum.io/rpc", "10": "https://mainnet.optimism.io", "43114": "https://api.avax.network/ext/bc/C/rpc", "42220": "https://forno.celo.org", "59144": "https://rpc.linea.build", "324": "https://mainnet.era.zksync.io" };
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const kv = await Deno.openKv();
+const NODEREAL_KEY = Deno.env.get("NODEREAL_API_KEY") || "";
+const BLOCKSCOUT_DOMAINS: Record<string, string> = { "8453": "base.blockscout.com", "10": "optimism.blockscout.com", "324": "zksync.blockscout.com" };
+const ROUTESCAN_CHAINS: Record<string, boolean> = { "43114": true };
+
+async function getWalletTokenTransfers(wallet: string, chainId: string): Promise<string[]> {
+  if (chainId === "56") {
+    if (!NODEREAL_KEY) return [];
+    const rpcUrl = `https://bsc-mainnet.nodereal.io/v1/${NODEREAL_KEY}`;
+    const uniqueTokens = new Set<string>();
+    for (const addrField of ["fromAddress", "toAddress"]) {
+      let pageKey: string | null = null;
+      let pages = 0;
+      do {
+        const params: any = { category: ["20"] };
+        params[addrField] = wallet;
+        if (pageKey) params.pageKey = pageKey;
+        try {
+          const res = await fetch(rpcUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", method: "nr_getAssetTransfers", params: [params], id: 1 }) });
+          const data: any = await res.json();
+          const transfers = data.result && data.result.transfers ? data.result.transfers : [];
+          transfers.forEach((t: any) => { if (t.contractAddress) uniqueTokens.add(t.contractAddress); });
+          pageKey = data.result ? data.result.pageKey : null;
+        } catch (e) { pageKey = null; }
+        pages++;
+        await new Promise((r) => setTimeout(r, 150));
+      } while (pageKey && pages < 5);
+    }
+    return [...uniqueTokens].slice(0, 40);
+  }
+  if (chainId in BLOCKSCOUT_DOMAINS) {
+    const domain = BLOCKSCOUT_DOMAINS[chainId];
+    const data: any = await httpGetJson(`https://${domain}/api?module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc`);
+    const transfers = Array.isArray(data?.result) ? data.result : [];
+    return [...new Set(transfers.map((t: any) => t.contractAddress))].slice(0, 40) as string[];
+  }
+  if (chainId in ROUTESCAN_CHAINS) {
+    const data: any = await httpGetJson(`https://api.routescan.io/v2/network/mainnet/evm/${chainId}/etherscan/api?module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc`);
+    const transfers = Array.isArray(data?.result) ? data.result : [];
+    return [...new Set(transfers.map((t: any) => t.contractAddress))].slice(0, 40) as string[];
+  }
+  const data: any = await httpGetJson(`https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc&apikey=${ETHERSCAN_KEY}`);
+  const transfers = Array.isArray(data?.result) ? data.result : [];
+  return [...new Set(transfers.map((t: any) => t.contractAddress))].slice(0, 40) as string[];
+}
 
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type, x-internal-key", "Access-Control-Allow-Methods": "GET, POST, OPTIONS" };
 
@@ -88,12 +132,42 @@ async function checkDeployerHistory(address: string, chainId: string) {
 async function getActiveApprovals(walletAddress: string, tokenAddress: string, chainId: string) {
   const approvalTopic = "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925";
   const ownerTopic = "0x" + walletAddress.toLowerCase().replace("0x", "").padStart(64, "0");
-  const apiUrl = `https://api.etherscan.io/v2/api?chainid=${chainId}&module=logs&action=getLogs&address=${tokenAddress}&topic0=${approvalTopic}&topic1=${ownerTopic}&topic0_1_opr=and&fromBlock=0&toBlock=latest&apikey=${ETHERSCAN_KEY}`;
+
+  if (chainId === "56") {
+    if (!NODEREAL_KEY) return [];
+    const rpcUrl = `https://bsc-mainnet.nodereal.io/v1/${NODEREAL_KEY}`;
+    const latestHex = await rpcCall(rpcUrl, "eth_blockNumber", []);
+    const latest = parseInt(latestHex, 16);
+    const fromBlock = "0x" + Math.max(0, latest - 2000000).toString(16);
+    const logs = await rpcCall(rpcUrl, "eth_getLogs", [{ address: tokenAddress, fromBlock, toBlock: "latest", topics: [approvalTopic, ownerTopic, null] }]);
+    if (!Array.isArray(logs)) return [];
+    const bnbLatestBySpender: Record<string, bigint> = {};
+    const bnbBlockBySpender: Record<string, number> = {};
+    for (const log of logs) {
+      const spender = "0x" + log.topics[2].slice(26);
+      const blockNum = parseInt(log.blockNumber, 16);
+      if (!(spender in bnbBlockBySpender) || blockNum >= bnbBlockBySpender[spender]) {
+        bnbBlockBySpender[spender] = blockNum;
+        bnbLatestBySpender[spender] = BigInt(log.data);
+      }
+    }
+    return Object.entries(bnbLatestBySpender).filter(([, amt]) => amt > 0n).map(([spender, amt]) => ({ spender, amountAtomic: amt.toString() }));
+  }
+
+  let apiUrl: string;
+  if (chainId in BLOCKSCOUT_DOMAINS) {
+    const domain = BLOCKSCOUT_DOMAINS[chainId];
+    apiUrl = `https://${domain}/api?module=logs&action=getLogs&address=${tokenAddress}&topic0=${approvalTopic}&topic1=${ownerTopic}&topic0_1_opr=and&fromBlock=0&toBlock=latest`;
+  } else if (chainId in ROUTESCAN_CHAINS) {
+    apiUrl = `https://api.routescan.io/v2/network/mainnet/evm/${chainId}/etherscan/api?module=logs&action=getLogs&address=${tokenAddress}&topic0=${approvalTopic}&topic1=${ownerTopic}&topic0_1_opr=and&fromBlock=0&toBlock=latest`;
+  } else {
+    apiUrl = `https://api.etherscan.io/v2/api?chainid=${chainId}&module=logs&action=getLogs&address=${tokenAddress}&topic0=${approvalTopic}&topic1=${ownerTopic}&topic0_1_opr=and&fromBlock=0&toBlock=latest&apikey=${ETHERSCAN_KEY}`;
+  }
   const data: any = await httpGetJson(apiUrl);
-  const logs = data && data.status === "1" && Array.isArray(data.result) ? data.result : [];
+  const logs2 = data && (data.status === "1" || data.message === "OK") && Array.isArray(data.result) ? data.result : [];
   const latestBySpender: Record<string, bigint> = {};
   const blockBySpender: Record<string, number> = {};
-  for (const log of logs) {
+  for (const log of logs2) {
     if (!log.topics || log.topics.length < 3) continue;
     const spender = "0x" + log.topics[2].slice(26);
     const blockNum = parseInt(log.blockNumber, 16);
@@ -132,10 +206,7 @@ Deno.serve(async (req) => {
     const chain = url.searchParams.get("chain") || "ethereum";
     const chainId = CHAIN_IDS[chain] || "1";
     if (!wallet) return json({ error: "Missing wallet" }, 400);
-    if (!ETHERSCAN_KEY) return json({ error: "Not configured" });
-    const txData: any = await httpGetJson(`https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc&apikey=${ETHERSCAN_KEY}`);
-    const transfers = Array.isArray(txData?.result) ? txData.result : [];
-    const uniqueTokens = [...new Set(transfers.map((t: any) => t.contractAddress))].slice(0, 40) as string[];
+    const uniqueTokens = await getWalletTokenTransfers(wallet, chainId);
     const riskyTokens: any[] = [];
     for (const t of uniqueTokens) {
       const gp = await checkGoPlus(t, chainId);
@@ -158,10 +229,7 @@ Deno.serve(async (req) => {
     const chainId = CHAIN_IDS[chain] || "1";
     if (!wallet) return json({ error: "Missing wallet" }, 400);
     if (!isPaid) return json({ error: "Payment required for full approvals scan" }, 402);
-    if (!ETHERSCAN_KEY) return json({ error: "Not configured" });
-    const txData: any = await httpGetJson(`https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc&apikey=${ETHERSCAN_KEY}`);
-    const transfers = Array.isArray(txData?.result) ? txData.result : [];
-    const uniqueTokens = [...new Set(transfers.map((t: any) => t.contractAddress))].slice(0, 40) as string[];
+    const uniqueTokens = await getWalletTokenTransfers(wallet, chainId);
     const allApprovals: any[] = [];
     const BATCH_SIZE = 5;
     for (let i = 0; i < uniqueTokens.length; i += BATCH_SIZE) {
