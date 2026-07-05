@@ -185,12 +185,56 @@ async function getActiveApprovals(walletAddress: string, tokenAddress: string, c
   return Object.entries(latestBySpender).filter(([, amt]) => amt > 0n).map(([spender, amt]) => ({ spender, amountAtomic: amt.toString() }));
 }
 
+const SOLANA_RPC = "https://api.mainnet-beta.solana.com";
+const SPL_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+
+async function getSolanaDelegations(walletAddress: string) {
+  try {
+    const res = await fetch(SOLANA_RPC, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0", id: 1, method: "getTokenAccountsByOwner",
+        params: [walletAddress, { programId: SPL_TOKEN_PROGRAM_ID }, { encoding: "jsonParsed" }]
+      })
+    });
+    const data = await res.json();
+    const accounts = data?.result?.value || [];
+    const delegations: any[] = [];
+    for (const acc of accounts) {
+      const info = acc?.account?.data?.parsed?.info;
+      if (!info) continue;
+      const delegate = info.delegate;
+      const delegatedAmount = info.delegatedAmount;
+      if (delegate && delegatedAmount && parseFloat(delegatedAmount.uiAmountString || "0") > 0) {
+        delegations.push({
+          tokenAccount: acc.pubkey,
+          mint: info.mint,
+          delegate: delegate,
+          delegatedAmount: delegatedAmount.uiAmountString,
+          rawAmount: delegatedAmount.amount
+        });
+      }
+    }
+    return delegations;
+  } catch (e) {
+    return [];
+  }
+}
+
 Deno.serve(async (req) => {
   const url = new URL(req.url);
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   const isPaid = req.headers.get("x-internal-key") === INTERNAL_KEY && !!INTERNAL_KEY;
 
   if (url.pathname === "/health") return json({ status: "ok" });
+
+  if (url.pathname === "/solana-approvals") {
+    const wallet = url.searchParams.get("wallet");
+    if (!wallet) return json({ error: "Missing wallet" }, 400);
+    const delegations = await getSolanaDelegations(wallet);
+    return json({ wallet, delegationCount: delegations.length, delegations: isPaid ? delegations : undefined });
+  }
 
   if (url.pathname === "/token-check") {
     const address = url.searchParams.get("address");
