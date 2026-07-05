@@ -14,11 +14,22 @@ function isSystemContractAddress(address: string): boolean {
   return asNumber < 65536n;
 }
 
-async function getWalletTokenTransfers(wallet: string, chainId: string): Promise<string[]> {
+interface TokenInfo { address: string; name: string; symbol: string; }
+
+function dedupeTokenInfo(list: TokenInfo[]): TokenInfo[] {
+  const seen = new Map<string, TokenInfo>();
+  for (const t of list) {
+    const key = t.address.toLowerCase();
+    if (!seen.has(key)) seen.set(key, t);
+  }
+  return [...seen.values()].filter((t) => !isSystemContractAddress(t.address)).slice(0, 40);
+}
+
+async function getWalletTokenTransfers(wallet: string, chainId: string): Promise<TokenInfo[]> {
   if (chainId === "56") {
     if (!NODEREAL_KEY) return [];
     const rpcUrl = `https://bsc-mainnet.nodereal.io/v1/${NODEREAL_KEY}`;
-    const uniqueTokens = new Set<string>();
+    const found: TokenInfo[] = [];
     for (const addrField of ["fromAddress", "toAddress"]) {
       let pageKey: string | null = null;
       let pages = 0;
@@ -30,29 +41,29 @@ async function getWalletTokenTransfers(wallet: string, chainId: string): Promise
           const res = await fetch(rpcUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", method: "nr_getAssetTransfers", params: [params], id: 1 }) });
           const data: any = await res.json();
           const transfers = data.result && data.result.transfers ? data.result.transfers : [];
-          transfers.forEach((t: any) => { if (t.contractAddress) uniqueTokens.add(t.contractAddress); });
+          transfers.forEach((t: any) => { if (t.contractAddress) found.push({ address: t.contractAddress, name: t.name || "", symbol: t.asset || "" }); });
           pageKey = data.result ? data.result.pageKey : null;
         } catch (e) { pageKey = null; }
         pages++;
         await new Promise((r) => setTimeout(r, 150));
       } while (pageKey && pages < 5);
     }
-    return [...uniqueTokens].filter((t) => !isSystemContractAddress(t)).slice(0, 40);
+    return dedupeTokenInfo(found);
   }
   if (chainId in BLOCKSCOUT_DOMAINS) {
     const domain = BLOCKSCOUT_DOMAINS[chainId];
     const data: any = await httpGetJson(`https://${domain}/api?module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc`);
     const transfers = Array.isArray(data?.result) ? data.result : [];
-    return [...new Set(transfers.map((t: any) => t.contractAddress))].filter((t: any) => !isSystemContractAddress(t)).slice(0, 40) as string[];
+    return dedupeTokenInfo(transfers.map((t: any) => ({ address: t.contractAddress, name: t.tokenName || "", symbol: t.tokenSymbol || "" })));
   }
   if (chainId in ROUTESCAN_CHAINS) {
     const data: any = await httpGetJson(`https://api.routescan.io/v2/network/mainnet/evm/${chainId}/etherscan/api?module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc`);
     const transfers = Array.isArray(data?.result) ? data.result : [];
-    return [...new Set(transfers.map((t: any) => t.contractAddress))].filter((t: any) => !isSystemContractAddress(t)).slice(0, 40) as string[];
+    return dedupeTokenInfo(transfers.map((t: any) => ({ address: t.contractAddress, name: t.tokenName || "", symbol: t.tokenSymbol || "" })));
   }
   const data: any = await httpGetJson(`https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc&apikey=${ETHERSCAN_KEY}`);
   const transfers = Array.isArray(data?.result) ? data.result : [];
-  return [...new Set(transfers.map((t: any) => t.contractAddress))].filter((t: any) => !isSystemContractAddress(t)).slice(0, 40) as string[];
+  return dedupeTokenInfo(transfers.map((t: any) => ({ address: t.contractAddress, name: t.tokenName || "", symbol: t.tokenSymbol || "" })));
 }
 
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type, x-internal-key", "Access-Control-Allow-Methods": "GET, POST, OPTIONS" };
@@ -258,13 +269,13 @@ Deno.serve(async (req) => {
     if (!wallet) return json({ error: "Missing wallet" }, 400);
     const uniqueTokens = await getWalletTokenTransfers(wallet, chainId);
     const riskyTokens: any[] = [];
-    for (const t of uniqueTokens) {
-      const gp = await checkGoPlus(t, chainId);
+    for (const tInfo of uniqueTokens) {
+      const gp = await checkGoPlus(tInfo.address, chainId);
       if (gp) {
         const r = computeRisk(gp, null);
         if (r.reasons.length > 0) {
-          const entry: any = { token: t, riskLevel: r.level };
-          if (isPaid) { entry.reasons = r.reasons; entry.approvals = await getActiveApprovals(wallet, t, chainId); }
+          const entry: any = { token: tInfo.address, tokenName: tInfo.name, tokenSymbol: tInfo.symbol, riskLevel: r.level };
+          if (isPaid) { entry.reasons = r.reasons; entry.approvals = await getActiveApprovals(wallet, tInfo.address, chainId); }
           riskyTokens.push(entry);
         }
       }
@@ -284,10 +295,10 @@ Deno.serve(async (req) => {
     const BATCH_SIZE = 5;
     for (let i = 0; i < uniqueTokens.length; i += BATCH_SIZE) {
       const batch = uniqueTokens.slice(i, i + BATCH_SIZE);
-      const results = await Promise.all(batch.map((t) => getActiveApprovals(wallet, t, chainId)));
+      const results = await Promise.all(batch.map((tInfo) => getActiveApprovals(wallet, tInfo.address, chainId)));
       results.forEach((approvals, idx) => {
         for (const a of approvals) {
-          allApprovals.push({ token: batch[idx], spender: a.spender, amountAtomic: a.amountAtomic, chain, chainId });
+          allApprovals.push({ token: batch[idx].address, tokenName: batch[idx].name, tokenSymbol: batch[idx].symbol, spender: a.spender, amountAtomic: a.amountAtomic, chain, chainId });
         }
       });
       await new Promise((r) => setTimeout(r, 150));
