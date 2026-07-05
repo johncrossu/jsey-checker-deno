@@ -8,6 +8,12 @@ const NODEREAL_KEY = Deno.env.get("NODEREAL_API_KEY") || "";
 const BLOCKSCOUT_DOMAINS: Record<string, string> = { "8453": "base.blockscout.com", "10": "optimism.blockscout.com", "324": "zksync.blockscout.com" };
 const ROUTESCAN_CHAINS: Record<string, boolean> = { "43114": true };
 
+function isSystemContractAddress(address: string): boolean {
+  const clean = address.toLowerCase().replace("0x", "");
+  const asNumber = BigInt("0x" + clean);
+  return asNumber < 65536n;
+}
+
 async function getWalletTokenTransfers(wallet: string, chainId: string): Promise<string[]> {
   if (chainId === "56") {
     if (!NODEREAL_KEY) return [];
@@ -31,22 +37,22 @@ async function getWalletTokenTransfers(wallet: string, chainId: string): Promise
         await new Promise((r) => setTimeout(r, 150));
       } while (pageKey && pages < 5);
     }
-    return [...uniqueTokens].slice(0, 40);
+    return [...uniqueTokens].filter((t) => !isSystemContractAddress(t)).slice(0, 40);
   }
   if (chainId in BLOCKSCOUT_DOMAINS) {
     const domain = BLOCKSCOUT_DOMAINS[chainId];
     const data: any = await httpGetJson(`https://${domain}/api?module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc`);
     const transfers = Array.isArray(data?.result) ? data.result : [];
-    return [...new Set(transfers.map((t: any) => t.contractAddress))].slice(0, 40) as string[];
+    return [...new Set(transfers.map((t: any) => t.contractAddress))].filter((t: any) => !isSystemContractAddress(t)).slice(0, 40) as string[];
   }
   if (chainId in ROUTESCAN_CHAINS) {
     const data: any = await httpGetJson(`https://api.routescan.io/v2/network/mainnet/evm/${chainId}/etherscan/api?module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc`);
     const transfers = Array.isArray(data?.result) ? data.result : [];
-    return [...new Set(transfers.map((t: any) => t.contractAddress))].slice(0, 40) as string[];
+    return [...new Set(transfers.map((t: any) => t.contractAddress))].filter((t: any) => !isSystemContractAddress(t)).slice(0, 40) as string[];
   }
   const data: any = await httpGetJson(`https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc&apikey=${ETHERSCAN_KEY}`);
   const transfers = Array.isArray(data?.result) ? data.result : [];
-  return [...new Set(transfers.map((t: any) => t.contractAddress))].slice(0, 40) as string[];
+  return [...new Set(transfers.map((t: any) => t.contractAddress))].filter((t: any) => !isSystemContractAddress(t)).slice(0, 40) as string[];
 }
 
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type, x-internal-key", "Access-Control-Allow-Methods": "GET, POST, OPTIONS" };
