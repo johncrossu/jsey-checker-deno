@@ -130,6 +130,8 @@ async function checkGoPlus(address: string, chainId: string) {
   const result = data && data.result && data.result[address.toLowerCase()];
   if (!result) { await kv.set(cacheKey, null, { expireIn: CACHE_TTL_MS }); return null; }
   const parsed = {
+    tokenName: result.token_name || "",
+    tokenSymbol: result.token_symbol || "",
     isHoneypot: result.is_honeypot === "1",
     lpLocked: result.lp_holders ? result.lp_holders.some((h: any) => h.is_locked === 1) : false,
     ownerCanMint: result.is_mintable === "1",
@@ -294,10 +296,12 @@ Deno.serve(async (req) => {
     let deployerData = null;
     if (isPaid) deployerData = await checkDeployerHistory(address, chainId);
     const risk = computeRisk(goPlusData, deployerData);
+    const tokenName = goPlusData?.tokenName || "";
+    const tokenSymbol = goPlusData?.tokenSymbol || "";
     if (!isPaid) {
-      return json({ address, chain, riskLevel: risk.level, summary: risk.level === "HIGH" ? "This token shows multiple high-risk warning signs." : risk.level === "MEDIUM" ? "This token shows some risk factors worth reviewing." : "No major red flags detected." });
+      return json({ address, chain, tokenName, tokenSymbol, riskLevel: risk.level, summary: risk.level === "HIGH" ? "This token shows multiple high-risk warning signs." : risk.level === "MEDIUM" ? "This token shows some risk factors worth reviewing." : "No major red flags detected." });
     }
-    return json({ address, chain, riskLevel: risk.level, riskScore: risk.riskPoints, reasons: risk.reasons, deployerData, goPlusData });
+    return json({ address, chain, tokenName, tokenSymbol, riskLevel: risk.level, riskScore: risk.riskPoints, reasons: risk.reasons, deployerData, goPlusData });
   }
 
   if (url.pathname === "/wallet-scan") {
