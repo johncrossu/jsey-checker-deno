@@ -8,6 +8,44 @@ const NODEREAL_KEY = Deno.env.get("NODEREAL_API_KEY") || "";
 const BLOCKSCOUT_DOMAINS: Record<string, string> = { "8453": "base.blockscout.com", "10": "optimism.blockscout.com", "324": "zksync.blockscout.com" };
 const ROUTESCAN_CHAINS: Record<string, boolean> = { "43114": true };
 
+const DEX_LABELS: Record<string, Record<string, string>> = {
+  "1": {
+    "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": "Uniswap V2 Router",
+    "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3 Router",
+    "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45": "Uniswap V3 Router 2",
+    "0x000000000022d473030f116ddee9f6b43ac78ba3": "Uniswap Permit2",
+  },
+  "8453": {
+    "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24": "Uniswap V2 Router",
+    "0x000000000022d473030f116ddee9f6b43ac78ba3": "Uniswap Permit2",
+  },
+  "42161": {
+    "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3 Router",
+    "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45": "Uniswap V3 Router 2",
+    "0xa51afafe0263b40edaef0df8781ea9aa03e381a3": "Uniswap Universal Router",
+    "0x000000000022d473030f116ddee9f6b43ac78ba3": "Uniswap Permit2",
+  },
+  "137": {
+    "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3 Router",
+    "0x1095692a6237d83c6a72f3f5efedb9a670c49223": "Uniswap Universal Router",
+    "0x000000000022d473030f116ddee9f6b43ac78ba3": "Uniswap Permit2",
+  },
+  "43114": {
+    "0x94b75331ae8d42c1b61065089b7d48fe14aa73b7": "Uniswap Universal Router",
+    "0x000000000022d473030f116ddee9f6b43ac78ba3": "Uniswap Permit2",
+  },
+  "56": {
+    "0x1906c1d672b88cd1b9ac7593301ca990f94eae07": "Uniswap Universal Router",
+    "0x000000000022d473030f116ddee9f6b43ac78ba3": "Uniswap Permit2",
+  },
+};
+
+function getSpenderLabel(spender: string, chainId: string): string | null {
+  const map = DEX_LABELS[chainId];
+  if (!map) return null;
+  return map[spender.toLowerCase()] || null;
+}
+
 function isSystemContractAddress(address: string): boolean {
   const clean = address.toLowerCase().replace("0x", "");
   const asNumber = BigInt("0x" + clean);
@@ -298,7 +336,7 @@ Deno.serve(async (req) => {
       const results = await Promise.all(batch.map((tInfo) => getActiveApprovals(wallet, tInfo.address, chainId)));
       results.forEach((approvals, idx) => {
         for (const a of approvals) {
-          allApprovals.push({ token: batch[idx].address, tokenName: batch[idx].name, tokenSymbol: batch[idx].symbol, spender: a.spender, amountAtomic: a.amountAtomic, chain, chainId });
+          allApprovals.push({ token: batch[idx].address, tokenName: batch[idx].name, tokenSymbol: batch[idx].symbol, spender: a.spender, spenderLabel: getSpenderLabel(a.spender, chainId), amountAtomic: a.amountAtomic, chain, chainId });
         }
       });
       await new Promise((r) => setTimeout(r, 150));
