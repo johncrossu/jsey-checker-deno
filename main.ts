@@ -361,9 +361,89 @@ Deno.serve({ port: Number(Deno.env.get("PORT")) || 8000 }, async (req) => {
     return json({ chain: chainId, deleted });
   }
 
-  if (url.pathname === "/buy-sell-simulation") {
+    if (url.pathname === "/generate-pdf-report") {
+    if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+    if (!isPaid) return json({ error: "Payment required" }, 402);
+    let body: any;
+    try { body = await req.json(); } catch { return json({ error: "Invalid JSON body" }, 400); }
+    const reportType = body.reportType === "wallet" ? "wallet" : "token";
+    if (!body.data) return json({ error: "Missing data field" }, 400);
+    try {
+      const pdfBytes = await generatePdfReport(body.data, reportType);
+      const filename = "jsey-" + reportType + "-report.pdf";
+      return new Response(pdfBytes as unknown as BodyInit, { status: 200, headers: { ...CORS, "content-type": "application/pdf", "content-disposition": "attachment; filename=\"" + filename + "\"" } });
+    } catch (e) {
+      return json({ error: "PDF generation failed", detail: String(e) }, 500);
+    }
+  }
+
+if (url.pathname === "/buy-sell-simulation") {
     return json({ error: "Not yet implemented — needs verified DEX router research before building." }, 501);
   }
 
   return json({ error: "Not found" }, 404);
 });
+
+async function generatePdfReport(data: any, reportType: string): Promise<Uint8Array> {
+  const { default: PDFDocument } = await import("npm:pdfkit");
+  const doc = new PDFDocument({ margin: 50 });
+  const chunks: Uint8Array[] = [];
+  doc.on("data", (c: Uint8Array) => chunks.push(c));
+  const done = new Promise<void>((resolve) => doc.on("end", () => resolve()));
+
+  doc.fontSize(20).fillColor("#0052FF").text("J-SEY", { continued: true }).fillColor("#000").text(" Risk Report");
+  doc.moveDown(0.5);
+  doc.fontSize(10).fillColor("#666").text(`Report type: ${reportType}`);
+  doc.text(`Scan time: ${new Date().toISOString()}`);
+  doc.moveDown(1);
+
+  if (reportType === "token") {
+    doc.fontSize(14).fillColor("#000").text("Token Details");
+    doc.fontSize(10).fillColor("#333");
+    doc.text(`Address: ${data.address || "N/A"}`);
+    doc.text(`Chain: ${data.chain || "N/A"}`);
+    doc.text(`Name: ${data.tokenName || "N/A"}`);
+    doc.text(`Symbol: ${data.tokenSymbol || "N/A"}`);
+    doc.moveDown(0.5);
+    doc.fontSize(14).fillColor("#000").text("Risk Assessment");
+    doc.fontSize(10).fillColor("#333");
+    doc.text(`Risk Level: ${data.riskLevel || "UNKNOWN"}`);
+    if (data.riskScore !== undefined) doc.text(`Risk Score: ${data.riskScore}`);
+    if (data.summary) doc.text(data.summary);
+    if (data.reasons && data.reasons.length) {
+      doc.moveDown(0.5);
+      doc.fontSize(12).text("Reasons:");
+      data.reasons.forEach((r: string) => doc.fontSize(10).text(`- ${r}`));
+    }
+    if (data.deployerData && data.deployerData.available) {
+      doc.moveDown(0.5);
+      doc.fontSize(12).text("Deployer Info:");
+      doc.fontSize(10).text(`Wallet: ${data.deployerData.deployerAddress || "N/A"}`);
+      if (data.deployerData.walletAgeDays !== undefined) doc.text(`Wallet age: ${data.deployerData.walletAgeDays} days`);
+      if (data.deployerData.otherTokensDeployedCount !== undefined) doc.text(`Other tokens deployed: ${data.deployerData.otherTokensDeployedCount}`);
+    }
+  } else if (reportType === "wallet") {
+    doc.fontSize(14).fillColor("#000").text("Wallet Scan Details");
+    doc.fontSize(10).fillColor("#333");
+    doc.text(`Wallet: ${data.wallet || "N/A"}`);
+    doc.text(`Chain: ${data.chain || "N/A"}`);
+    doc.text(`Tokens checked: ${data.tokensChecked ?? "N/A"}`);
+    doc.text(`Risky tokens found: ${data.riskyCount ?? "N/A"}`);
+    doc.moveDown(0.5);
+    if (data.riskyTokens && data.riskyTokens.length) {
+      doc.fontSize(12).text("Risky Tokens:");
+      data.riskyTokens.forEach((t: any) => {
+        doc.fontSize(10).text(`${t.tokenName || t.token} (${t.tokenSymbol || ""}) — ${t.riskLevel}`);
+        if (t.reasons) t.reasons.forEach((r: string) => doc.fontSize(9).fillColor("#555").text(`   - ${r}`));
+        doc.fillColor("#333");
+      });
+    }
+  }
+
+  doc.moveDown(1);
+  doc.fontSize(8).fillColor("#999").text("This report reflects blockchain data available at scan time. It is not a guarantee of safety or profitability. J-SEY makes no claims of 100% scam or honeypot detection accuracy.", { width: 500 });
+
+  doc.end();
+  await done;
+  return new Uint8Array(Buffer.concat(chunks));
+}
