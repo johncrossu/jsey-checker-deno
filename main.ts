@@ -372,20 +372,7 @@ Deno.serve({ port: Number(Deno.env.get("PORT")) || 8000 }, async (req) => {
     return json({ chain: chainId, deleted });
   }
 
-    if (url.pathname === "/debug-fonts") {
-    let info: any = { cwd: Deno.cwd() };
-    try { info.fontsDir = [...Deno.readDirSync("fonts")].map(e => e.name); } catch (e) { info.fontsDirError = String(e); }
-    try {
-      const { default: PDFDocument } = await import("npm:pdfkit");
-      const testDoc = new PDFDocument();
-      testDoc.registerFont("Inter", "fonts/Inter-Regular.ttf");
-      testDoc.font("Inter");
-      info.fontLoadOk = true;
-    } catch (e) { info.fontLoadError = String(e); }
-    return json(info, 200);
-  }
-
-  if (url.pathname === "/generate-pdf-report") {
+    if (url.pathname === "/generate-pdf-report") {
     if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
     if (!isPaid) return json({ error: "Payment required" }, 402);
     let body: any;
