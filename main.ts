@@ -122,9 +122,20 @@ async function rpcCall(rpcUrl: string, method: string, params: unknown[]) {
   } catch (e) { return null; }
 }
 
-async function checkGoPlus(address: string, chainId: string) {
+interface GoPlusResult {
+  tokenName: string;
+  tokenSymbol: string;
+  isHoneypot: boolean;
+  lpLocked: boolean;
+  ownerCanMint: boolean;
+  ownershipRenounced: boolean;
+  sellTax: string;
+  top10HoldersPercent: number | null;
+}
+
+async function checkGoPlus(address: string, chainId: string): Promise<GoPlusResult | null> {
   const cacheKey = ["tokenrisk", chainId, address.toLowerCase()];
-  const cached = await kv.get(cacheKey);
+  const cached = await kv.get<GoPlusResult | null>(cacheKey);
   if (cached && cached.versionstamp !== null) return cached.value;
   const data: any = await httpGetJson(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
   const result = data && data.result && data.result[address.toLowerCase()];
@@ -361,7 +372,20 @@ Deno.serve({ port: Number(Deno.env.get("PORT")) || 8000 }, async (req) => {
     return json({ chain: chainId, deleted });
   }
 
-    if (url.pathname === "/generate-pdf-report") {
+    if (url.pathname === "/debug-fonts") {
+    let info: any = { cwd: Deno.cwd() };
+    try { info.fontsDir = [...Deno.readDirSync("fonts")].map(e => e.name); } catch (e) { info.fontsDirError = String(e); }
+    try {
+      const { default: PDFDocument } = await import("npm:pdfkit");
+      const testDoc = new PDFDocument();
+      testDoc.registerFont("Inter", "fonts/Inter-Regular.ttf");
+      testDoc.font("Inter");
+      info.fontLoadOk = true;
+    } catch (e) { info.fontLoadError = String(e); }
+    return json(info, 200);
+  }
+
+  if (url.pathname === "/generate-pdf-report") {
     if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
     if (!isPaid) return json({ error: "Payment required" }, 402);
     let body: any;
@@ -386,62 +410,102 @@ if (url.pathname === "/buy-sell-simulation") {
 
 async function generatePdfReport(data: any, reportType: string): Promise<Uint8Array> {
   const { default: PDFDocument } = await import("npm:pdfkit");
-  const doc = new PDFDocument({ margin: 50 });
+  const NAVY = "#0052FF";
+  const GOLD = "#FFD12F";
+  const doc = new PDFDocument({ margin: 50, size: "A4" });
+  doc.registerFont("Inter", "fonts/Inter-Regular.ttf");
+  doc.registerFont("Inter-Bold", "fonts/Inter-Bold.ttf");
+  doc.registerFont("Inter-Italic", "fonts/Inter-Italic.ttf");
   const chunks: Uint8Array[] = [];
   doc.on("data", (c: Uint8Array) => chunks.push(c));
   const done = new Promise<void>((resolve) => doc.on("end", () => resolve()));
 
-  doc.fontSize(20).fillColor("#0052FF").text("J-SEY", { continued: true }).fillColor("#000").text(" Risk Report");
-  doc.moveDown(0.5);
-  doc.fontSize(10).fillColor("#666").text(`Report type: ${reportType}`);
+  const pageWidth = doc.page.width;
+  const pageHeight = doc.page.height;
+
+  function drawWatermark() {
+    doc.save();
+    doc.rotate(-45, { origin: [pageWidth / 2, pageHeight / 2] });
+    doc.fontSize(80).font("Inter-Bold").fillColor(NAVY).fillOpacity(0.06);
+    doc.text("J-SEY", 0, pageHeight / 2 - 40, { width: pageWidth, align: "center" });
+    doc.fillOpacity(1);
+    doc.restore();
+  }
+  drawWatermark();
+  doc.on("pageAdded", drawWatermark);
+
+  doc.rect(0, 0, pageWidth, 110).fill(NAVY);
+  doc.fillColor("#FFFFFF").fontSize(28).font("Inter-Bold").text("J-SEY", 50, 35, { continued: true });
+  doc.font("Inter").fontSize(18).fillColor("#DCE6FF").text("  Risk Report");
+  doc.rect(0, 110, pageWidth, 4).fill(GOLD);
+  doc.y = 135;
+  doc.x = 50;
+
+  doc.fontSize(9).fillColor("#888").font("Inter");
+  doc.text(`Report type: ${reportType === "wallet" ? "Wallet Scan" : "Token Check"}`);
   doc.text(`Scan time: ${new Date().toISOString()}`);
   doc.moveDown(1);
 
   if (reportType === "token") {
-    doc.fontSize(14).fillColor("#000").text("Token Details");
-    doc.fontSize(10).fillColor("#333");
+    doc.fontSize(14).fillColor(NAVY).font("Inter-Bold").text("Token Details");
+    doc.fontSize(10).fillColor("#333").font("Inter");
     doc.text(`Address: ${data.address || "N/A"}`);
     doc.text(`Chain: ${data.chain || "N/A"}`);
     doc.text(`Name: ${data.tokenName || "N/A"}`);
     doc.text(`Symbol: ${data.tokenSymbol || "N/A"}`);
     doc.moveDown(0.5);
-    doc.fontSize(14).fillColor("#000").text("Risk Assessment");
-    doc.fontSize(10).fillColor("#333");
+    doc.fontSize(14).fillColor(NAVY).font("Inter-Bold").text("Risk Assessment");
+    doc.fontSize(10).fillColor("#333").font("Inter");
     doc.text(`Risk Level: ${data.riskLevel || "UNKNOWN"}`);
     if (data.riskScore !== undefined) doc.text(`Risk Score: ${data.riskScore}`);
     if (data.summary) doc.text(data.summary);
     if (data.reasons && data.reasons.length) {
       doc.moveDown(0.5);
-      doc.fontSize(12).text("Reasons:");
-      data.reasons.forEach((r: string) => doc.fontSize(10).text(`- ${r}`));
+      doc.font("Inter-Bold").fontSize(12).fillColor(NAVY).text("Reasons:");
+      doc.font("Inter");
+      data.reasons.forEach((r: string) => doc.fontSize(10).fillColor("#333").text(`- ${r}`));
     }
     if (data.deployerData && data.deployerData.available) {
       doc.moveDown(0.5);
-      doc.fontSize(12).text("Deployer Info:");
-      doc.fontSize(10).text(`Wallet: ${data.deployerData.deployerAddress || "N/A"}`);
+      doc.font("Inter-Bold").fontSize(12).fillColor(NAVY).text("Deployer Info:");
+      doc.font("Inter").fontSize(10).fillColor("#333");
+      doc.text(`Wallet: ${data.deployerData.deployerAddress || "N/A"}`);
       if (data.deployerData.walletAgeDays !== undefined) doc.text(`Wallet age: ${data.deployerData.walletAgeDays} days`);
       if (data.deployerData.otherTokensDeployedCount !== undefined) doc.text(`Other tokens deployed: ${data.deployerData.otherTokensDeployedCount}`);
     }
   } else if (reportType === "wallet") {
-    doc.fontSize(14).fillColor("#000").text("Wallet Scan Details");
-    doc.fontSize(10).fillColor("#333");
+    doc.fontSize(14).fillColor(NAVY).font("Inter-Bold").text("Wallet Scan Details");
+    doc.fontSize(10).fillColor("#333").font("Inter");
     doc.text(`Wallet: ${data.wallet || "N/A"}`);
     doc.text(`Chain: ${data.chain || "N/A"}`);
     doc.text(`Tokens checked: ${data.tokensChecked ?? "N/A"}`);
     doc.text(`Risky tokens found: ${data.riskyCount ?? "N/A"}`);
     doc.moveDown(0.5);
     if (data.riskyTokens && data.riskyTokens.length) {
-      doc.fontSize(12).text("Risky Tokens:");
+      doc.font("Inter-Bold").fontSize(12).fillColor(NAVY).text("Risky Tokens:");
+      doc.font("Inter");
       data.riskyTokens.forEach((t: any) => {
-        doc.fontSize(10).text(`${t.tokenName || t.token} (${t.tokenSymbol || ""}) — ${t.riskLevel}`);
-        if (t.reasons) t.reasons.forEach((r: string) => doc.fontSize(9).fillColor("#555").text(`   - ${r}`));
-        doc.fillColor("#333");
+        if (doc.y > pageHeight - 120) doc.addPage();
+        const rColor = t.riskLevel === "HIGH" ? "#c0392b" : t.riskLevel === "MEDIUM" ? "#b8860b" : "#2e7d32";
+        doc.fontSize(10).fillColor("#111").font("Inter-Bold").text(`${t.tokenName || t.token} (${t.tokenSymbol || ""}) `, { continued: true });
+        doc.fillColor(rColor).text(t.riskLevel);
+        doc.font("Inter").fillColor("#555");
+        if (t.reasons) t.reasons.forEach((r: string) => doc.fontSize(9).text(`   - ${r}`));
+        doc.moveDown(0.3);
       });
     }
   }
 
-  doc.moveDown(1);
-  doc.fontSize(8).fillColor("#999").text("This report reflects blockchain data available at scan time. It is not a guarantee of safety or profitability. J-SEY makes no claims of 100% scam or honeypot detection accuracy.", { width: 500 });
+  if (doc.y > pageHeight - 150) doc.addPage();
+  doc.moveDown(1.5);
+  const boxTop = doc.y;
+  const boxHeight = 90;
+  doc.rect(50, boxTop, pageWidth - 100, boxHeight).lineWidth(1).strokeColor("#ccc").stroke();
+  doc.fontSize(9).font("Inter-Bold").fillColor(NAVY).text("Legal Notice", 62, boxTop + 10);
+  doc.font("Inter-Italic").fontSize(8).fillColor("#555").text(
+    "This report reflects blockchain data available at the time of scan. J-SEY makes no claims of one hundred percent scam or honeypot detection accuracy, and this report does not constitute financial, legal, or investment advice. It is not a guarantee of safety, legitimacy, or profitability of any token or wallet referenced herein. Users act at their own risk and should conduct independent due diligence before any transaction.",
+    62, boxTop + 26, { width: pageWidth - 124 }
+  );
 
   doc.end();
   await done;
