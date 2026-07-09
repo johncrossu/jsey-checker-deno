@@ -3,6 +3,7 @@ WORKDIR /app
 COPY deno.json .
 COPY deno.lock .
 COPY main.ts .
+COPY fonts/ fonts/
 RUN deno install --allow-scripts
 RUN deno cache --unstable-kv main.ts
 EXPOSE 8000
