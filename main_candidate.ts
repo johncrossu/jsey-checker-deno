@@ -566,12 +566,10 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
     let y = ruleY + 22;
 
     doc.rect(leftMargin, y, contentWidth, 70).strokeColor(LIGHT_BORDER).lineWidth(1).stroke();
+    doc.fontSize(8).fillColor(NAVY).font("Inter-Bold").text("WALLET", leftMargin + 12, y + 10);
+    doc.fontSize(9).fillColor("#333").font("Inter").text(data.wallet || "N/A", leftMargin + 12, y + 22, { width: contentWidth - 24 });
     const col2X = leftMargin + contentWidth * 0.45;
     const col3X = leftMargin + contentWidth * 0.72;
-    const walletFull = data.wallet || "N/A";
-    const walletDisplay = walletFull.length > 20 ? walletFull.slice(0, 10) + "..." + walletFull.slice(-8) : walletFull;
-    doc.fontSize(8).fillColor(NAVY).font("Inter-Bold").text("WALLET", leftMargin + 12, y + 10);
-    doc.fontSize(9).fillColor("#333").font("Inter").text(walletDisplay, leftMargin + 12, y + 22, { width: col2X - leftMargin - 20 });
     doc.fontSize(8).fillColor(NAVY).font("Inter-Bold").text("CHAIN", col2X, y + 10);
     doc.fontSize(9).fillColor("#333").font("Inter").text(data.chain || "N/A", col2X, y + 22, { width: contentWidth * 0.25 });
     doc.fontSize(8).fillColor(NAVY).font("Inter-Bold").text("TOKENS CHECKED", col3X, y + 10);

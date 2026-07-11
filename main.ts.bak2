@@ -398,11 +398,6 @@ if (url.pathname === "/buy-sell-simulation") {
 async function generatePdfReport(data: any, reportType: string): Promise<Uint8Array> {
   const { default: PDFDocument } = await import("npm:pdfkit");
   const NAVY = "#0A1A4A";
-  const GOLD = "#B8860B";
-  const RED = "#C0392B";
-  const GREEN = "#2E7D32";
-  const GRAY = "#666666";
-  const LIGHT_BORDER = "#DDDDDD";
   const doc = new PDFDocument({ margin: 50, size: "A4" });
   doc.registerFont("Inter", "fonts/Inter-Regular.ttf");
   doc.registerFont("Inter-Bold", "fonts/Inter-Bold.ttf");
@@ -413,9 +408,6 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
 
   const pageWidth = doc.page.width;
   const pageHeight = doc.page.height;
-  const leftMargin = 50;
-  const rightMargin = pageWidth - 50;
-  const contentWidth = pageWidth - 100;
 
   function drawWatermark() {
     const wmWidth = 260;
@@ -428,275 +420,79 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
   drawWatermark();
   doc.on("pageAdded", drawWatermark);
 
-  const lhWidth = 110;
+  const lhWidth = 140;
   const lhHeight = lhWidth * (890 / 993);
   const lhX = (pageWidth - lhWidth) / 2;
   const lhY = 28;
   doc.image("assets/jsey-letterhead.png", lhX, lhY, { width: lhWidth, height: lhHeight });
 
-  doc.fontSize(8).fillColor(GRAY).font("Inter").text(
-    "Comprehensive blockchain intelligence and risk analysis report.",
-    leftMargin, lhY + lhHeight + 8, { width: contentWidth, align: "center" }
-  );
-
-  const ruleY = lhY + lhHeight + 24;
-  const rule = doc.linearGradient(leftMargin, ruleY, rightMargin, ruleY);
+  const ruleY = lhY + lhHeight + 12;
+  const rule = doc.linearGradient(50, ruleY, pageWidth - 50, ruleY);
   rule.stop(0, "#0A1A4A").stop(0.5, "#3A6ED0").stop(1, "#0A1A4A");
-  doc.rect(leftMargin, ruleY, contentWidth, 2.5).fill(rule);
+  doc.rect(50, ruleY, pageWidth - 100, 2.5).fill(rule);
 
-  function drawDonutSegment(cx: number, cy: number, outerR: number, innerR: number, startAngle: number, endAngle: number, color: string) {
-    if (endAngle <= startAngle) return;
-    const steps = Math.max(2, Math.ceil((endAngle - startAngle) / (Math.PI / 60)));
-    doc.save();
-    doc.fillColor(color);
-    doc.moveTo(cx + outerR * Math.sin(startAngle), cy - outerR * Math.cos(startAngle));
-    for (let i = 1; i <= steps; i++) {
-      const a = startAngle + (endAngle - startAngle) * (i / steps);
-      doc.lineTo(cx + outerR * Math.sin(a), cy - outerR * Math.cos(a));
-    }
-    for (let i = steps; i >= 0; i--) {
-      const a = startAngle + (endAngle - startAngle) * (i / steps);
-      doc.lineTo(cx + innerR * Math.sin(a), cy - innerR * Math.cos(a));
-    }
-    doc.closePath();
-    doc.fill();
-    doc.restore();
-  }
+  doc.y = ruleY + 18;
+  doc.x = 50;
 
-  const scanTime = new Date().toISOString().replace("T", " ").replace("Z", " UTC");
+  doc.fontSize(9).fillColor("#888").font("Inter");
+  doc.text(`Report type: ${reportType === "wallet" ? "Wallet Scan" : "Token Check"}`);
+  doc.text(`Scan time: ${new Date().toISOString()}`);
+  doc.moveDown(1);
 
   if (reportType === "token") {
-    doc.y = ruleY + 22;
-    doc.x = leftMargin;
-    doc.fontSize(14).fillColor(NAVY).font("Inter-Bold").text("Token Details", leftMargin, doc.y);
-    doc.moveDown(0.3);
-    const boxTop1 = doc.y;
-    doc.rect(leftMargin, boxTop1, contentWidth, 78).strokeColor(LIGHT_BORDER).lineWidth(1).stroke();
-    doc.fontSize(9).fillColor("#333").font("Inter");
-    doc.text(`Address: ${data.address || "N/A"}`, leftMargin + 12, boxTop1 + 10, { width: contentWidth - 24 });
-    doc.text(`Chain: ${data.chain || "N/A"}`, leftMargin + 12, boxTop1 + 30);
-    doc.text(`Name: ${data.tokenName || "N/A"}`, leftMargin + 12, boxTop1 + 46);
-    doc.text(`Symbol: ${data.tokenSymbol || "N/A"}`, leftMargin + 12, boxTop1 + 62);
-    doc.y = boxTop1 + 78 + 16;
-    doc.x = leftMargin;
-
-    const level = (data.riskLevel || "UNKNOWN").toUpperCase();
-    const levelColor = level === "HIGH" ? RED : level === "MEDIUM" ? GOLD : level === "LOW" ? GREEN : GRAY;
-    doc.fontSize(14).fillColor(NAVY).font("Inter-Bold").text("Risk Assessment", leftMargin, doc.y);
-    doc.moveDown(0.3);
-    const boxTop2 = doc.y;
-    const box2Height = data.riskScore !== undefined ? 90 : 40;
-    doc.rect(leftMargin, boxTop2, contentWidth, box2Height).strokeColor(LIGHT_BORDER).lineWidth(1).stroke();
-    doc.fontSize(18).fillColor(levelColor).font("Inter-Bold").text(level, leftMargin + 14, boxTop2 + 12);
-    if (data.riskScore !== undefined) {
-      const barY = boxTop2 + 44;
-      const barWidth = contentWidth - 28;
-      const pct = Math.max(0, Math.min(100, data.riskScore)) / 100;
-      doc.fontSize(9).fillColor("#333").font("Inter").text(`Risk Score: ${data.riskScore} / 100`, leftMargin + 14, barY);
-      doc.rect(leftMargin + 14, barY + 14, barWidth, 8).fillColor("#EEEEEE").fill();
-      doc.rect(leftMargin + 14, barY + 14, barWidth * pct, 8).fillColor(levelColor).fill();
-    }
-    doc.y = boxTop2 + box2Height + 14;
-    doc.x = leftMargin;
-
-    if (data.summary) {
-      doc.fontSize(9).fillColor("#555").font("Inter-Italic").text(data.summary, leftMargin, doc.y, { width: contentWidth });
-      doc.moveDown(0.5);
-    }
-
+    doc.fontSize(14).fillColor(NAVY).font("Inter-Bold").text("Token Details");
+    doc.fontSize(10).fillColor("#333").font("Inter");
+    doc.text(`Address: ${data.address || "N/A"}`);
+    doc.text(`Chain: ${data.chain || "N/A"}`);
+    doc.text(`Name: ${data.tokenName || "N/A"}`);
+    doc.text(`Symbol: ${data.tokenSymbol || "N/A"}`);
+    doc.moveDown(0.5);
+    doc.fontSize(14).fillColor(NAVY).font("Inter-Bold").text("Risk Assessment");
+    doc.fontSize(10).fillColor("#333").font("Inter");
+    doc.text(`Risk Level: ${data.riskLevel || "UNKNOWN"}`);
+    if (data.riskScore !== undefined) doc.text(`Risk Score: ${data.riskScore}`);
+    if (data.summary) doc.text(data.summary);
     if (data.reasons && data.reasons.length) {
-      doc.font("Inter-Bold").fontSize(12).fillColor(NAVY).text("Reasons:", leftMargin, doc.y);
-      doc.moveDown(0.2);
-      doc.font("Inter").fillColor("#333");
-      data.reasons.forEach((r: string) => {
-        doc.fontSize(9).text(`- ${r}`, leftMargin + 10, doc.y, { width: contentWidth - 20 });
-      });
-      doc.moveDown(0.4);
+      doc.moveDown(0.5);
+      doc.font("Inter-Bold").fontSize(12).fillColor(NAVY).text("Reasons:");
+      doc.font("Inter");
+      data.reasons.forEach((r: string) => doc.fontSize(10).fillColor("#333").text(`- ${r}`));
     }
-
     if (data.deployerData && data.deployerData.available) {
-      doc.font("Inter-Bold").fontSize(12).fillColor(NAVY).text("Deployer Info:", leftMargin, doc.y);
-      doc.moveDown(0.2);
-      doc.font("Inter").fillColor("#333").fontSize(9);
-      doc.text(`Wallet: ${data.deployerData.deployerAddress || "N/A"}`, leftMargin + 10, doc.y);
-      if (data.deployerData.walletAgeDays !== undefined) doc.text(`Wallet age: ${data.deployerData.walletAgeDays} days`, leftMargin + 10, doc.y + 2);
-      if (data.deployerData.otherTokensDeployedCount !== undefined) doc.text(`Other tokens deployed: ${data.deployerData.otherTokensDeployedCount}`, leftMargin + 10, doc.y + 2);
-      doc.moveDown(0.6);
+      doc.moveDown(0.5);
+      doc.font("Inter-Bold").fontSize(12).fillColor(NAVY).text("Deployer Info:");
+      doc.font("Inter").fontSize(10).fillColor("#333");
+      doc.text(`Wallet: ${data.deployerData.deployerAddress || "N/A"}`);
+      if (data.deployerData.walletAgeDays !== undefined) doc.text(`Wallet age: ${data.deployerData.walletAgeDays} days`);
+      if (data.deployerData.otherTokensDeployedCount !== undefined) doc.text(`Other tokens deployed: ${data.deployerData.otherTokensDeployedCount}`);
     }
-
-    doc.fontSize(8).fillColor("#888").font("Inter").text(`Scan time: ${scanTime}`, leftMargin, doc.y);
-    doc.moveDown(0.8);
-
-    if (doc.y > pageHeight - 160) doc.addPage();
-    const legalTop = doc.y;
-    doc.rect(leftMargin, legalTop, contentWidth, 70).lineWidth(1).strokeColor(LIGHT_BORDER).stroke();
-    doc.font("Inter-Italic").fontSize(7.5).fillColor("#555").text(
-      "This report reflects blockchain data available at the time of scan. J-SEY makes no claims of one hundred percent scam or honeypot detection accuracy, and this report does not constitute financial, legal, or investment advice. It is not a guarantee of safety, legitimacy, or profitability of any token or wallet referenced herein. Users act at their own risk and should conduct independent due diligence before any transaction.",
-      leftMargin + 12, legalTop + 10, { width: contentWidth - 24 }
-    );
-    doc.fontSize(8).fillColor(GRAY).font("Inter").text("jsey.dpdns.org  |  support@jsey.dpdns.org", leftMargin, legalTop + 78, { width: contentWidth, align: "center" });
-
   } else if (reportType === "wallet") {
-    const riskyTokens: any[] = data.riskyTokens || [];
-    let highCount = 0, medCount = 0, lowCount = 0;
-    for (const t of riskyTokens) {
-      if (t.riskLevel === "HIGH") highCount++;
-      else if (t.riskLevel === "MEDIUM") medCount++;
-      else lowCount++;
-    }
-    const total = riskyTokens.length || 1;
+    doc.fontSize(14).fillColor(NAVY).font("Inter-Bold").text("Wallet Scan Details");
+    doc.fontSize(10).fillColor("#333").font("Inter");
+    doc.text(`Wallet: ${data.wallet || "N/A"}`);
+    doc.text(`Chain: ${data.chain || "N/A"}`);
+    doc.text(`Tokens checked: ${data.tokensChecked ?? "N/A"}`);
+    doc.text(`Risky tokens found: ${data.riskyCount ?? "N/A"}`);
+    doc.moveDown(0.5);
 
-    const indicatorDefs = [
-      { key: "not locked", label: "Liquidity Not Locked", desc: "Can be removed by the deployer at any time" },
-      { key: "not been renounced", label: "Ownership Not Renounced", desc: "Deployer retains control" },
-      { key: "can mint new tokens", label: "Mint Function Enabled", desc: "Can mint new tokens, diluting holders" },
-      { key: "sell tax", label: "High Sell Tax Detected", desc: "Potentially malicious tax configuration" },
-      { key: "honeypot", label: "Honeypot Flagged", desc: "Token cannot be sold after buying" },
-      { key: "holders control", label: "High Holder Concentration", desc: "Top holders control majority of supply" },
-      { key: "other token(s)", label: "Repeat Offender Deployer", desc: "Deployer has a history of risky tokens" },
-    ];
-    const indicatorCounts = indicatorDefs.map((def) => {
-      let count = 0;
-      for (const t of riskyTokens) {
-        if (t.reasons && t.reasons.some((r: string) => r.toLowerCase().includes(def.key))) count++;
-      }
-      return { ...def, count };
-    }).filter((i) => i.count > 0).slice(0, 4);
-
-    let y = ruleY + 22;
-
-    doc.rect(leftMargin, y, contentWidth, 70).strokeColor(LIGHT_BORDER).lineWidth(1).stroke();
-    const col2X = leftMargin + contentWidth * 0.45;
-    const col3X = leftMargin + contentWidth * 0.72;
-    const walletFull = data.wallet || "N/A";
-    const walletDisplay = walletFull.length > 20 ? walletFull.slice(0, 10) + "..." + walletFull.slice(-8) : walletFull;
-    doc.fontSize(8).fillColor(NAVY).font("Inter-Bold").text("WALLET", leftMargin + 12, y + 10);
-    doc.fontSize(9).fillColor("#333").font("Inter").text(walletDisplay, leftMargin + 12, y + 22, { width: col2X - leftMargin - 20 });
-    doc.fontSize(8).fillColor(NAVY).font("Inter-Bold").text("CHAIN", col2X, y + 10);
-    doc.fontSize(9).fillColor("#333").font("Inter").text(data.chain || "N/A", col2X, y + 22, { width: contentWidth * 0.25 });
-    doc.fontSize(8).fillColor(NAVY).font("Inter-Bold").text("TOKENS CHECKED", col3X, y + 10);
-    doc.fontSize(9).fillColor("#333").font("Inter").text(String(data.tokensChecked ?? "N/A"), col3X, y + 22);
-    doc.fontSize(8).fillColor(NAVY).font("Inter-Bold").text("RISKY TOKENS FOUND", col2X, y + 42);
-    doc.fontSize(9).fillColor("#333").font("Inter").text(String(data.riskyCount ?? "N/A"), col2X, y + 54);
-    y += 70 + 16;
-
-    doc.rect(leftMargin, y, contentWidth, 22).fillColor(NAVY).fill();
-    doc.fontSize(10).fillColor("#FFFFFF").font("Inter-Bold").text("RISK SUMMARY", leftMargin + 12, y + 6);
-    y += 22;
-    const summaryBoxTop = y;
-    const summaryBoxHeight = 140;
-    doc.rect(leftMargin, summaryBoxTop, contentWidth, summaryBoxHeight).strokeColor(LIGHT_BORDER).lineWidth(1).stroke();
-
-    const cx = leftMargin + 70;
-    const cy = summaryBoxTop + summaryBoxHeight / 2;
-    const outerR = 50, innerR = 28;
-    let angleCursor = 0;
-    const highAngle = (highCount / total) * Math.PI * 2;
-    const medAngle = (medCount / total) * Math.PI * 2;
-    const lowAngle = (lowCount / total) * Math.PI * 2;
-    drawDonutSegment(cx, cy, outerR, innerR, angleCursor, angleCursor + highAngle, RED); angleCursor += highAngle;
-    drawDonutSegment(cx, cy, outerR, innerR, angleCursor, angleCursor + medAngle, GOLD); angleCursor += medAngle;
-    drawDonutSegment(cx, cy, outerR, innerR, angleCursor, angleCursor + lowAngle, "#1E56A0");
-    doc.fontSize(18).fillColor(NAVY).font("Inter-Bold").text(String(riskyTokens.length), cx - 30, cy - 16, { width: 60, align: "center" });
-    doc.fontSize(7).fillColor(GRAY).font("Inter").text("TOTAL", cx - 30, cy + 6, { width: 60, align: "center" });
-
-    const legendX = leftMargin + 150;
-    let legendY = summaryBoxTop + 26;
-    const legendRows = [
-      { label: "HIGH RISK", color: RED, count: highCount },
-      { label: "MEDIUM RISK", color: GOLD, count: medCount },
-      { label: "LOW RISK", color: "#1E56A0", count: lowCount },
-    ];
-    legendRows.forEach((row) => {
-      doc.circle(legendX + 4, legendY + 4, 4).fillColor(row.color).fill();
-      doc.fontSize(9).fillColor("#333").font("Inter-Bold").text(row.label, legendX + 16, legendY, { continued: true });
-      doc.font("Inter").text(`   ${row.count} (${((row.count / total) * 100).toFixed(1)}%)`);
-      legendY += 24;
-    });
-
-    const rlX = leftMargin + 340;
-    doc.fontSize(9).fillColor(NAVY).font("Inter-Bold").text("RISK LEVEL", rlX, summaryBoxTop + 16);
-    const overallLevel = highCount > 0 ? "ELEVATED RISK" : medCount > 0 ? "MODERATE RISK" : "LOW RISK";
-    const overallColor = highCount > 0 ? RED : medCount > 0 ? GOLD : GREEN;
-    doc.fontSize(11).fillColor(overallColor).font("Inter-Bold").text(overallLevel, rlX, summaryBoxTop + 34, { width: rightMargin - rlX - 10 });
-    const overallMsg = highCount > 0
-      ? "A significant number of tokens exhibit potential risk factors. Exercise extreme caution."
-      : medCount > 0
-      ? "Some tokens show risk factors worth reviewing before proceeding."
-      : "No major red flags detected across scanned tokens.";
-    doc.fontSize(8).fillColor("#555").font("Inter").text(overallMsg, rlX, summaryBoxTop + 56, { width: rightMargin - rlX - 10 });
-
-    y = summaryBoxTop + summaryBoxHeight + 16;
-
-    const twoColY = y;
-    const colWidth = (contentWidth - 16) / 2;
-    const rightColX = leftMargin + colWidth + 16;
-    doc.rect(leftMargin, twoColY, colWidth, 20).fillColor(NAVY).fill();
-    doc.fontSize(9).fillColor("#FFFFFF").font("Inter-Bold").text("KEY RISK INDICATORS", leftMargin + 10, twoColY + 5);
-    doc.rect(rightColX, twoColY, colWidth, 20).fillColor(NAVY).fill();
-    doc.fontSize(9).fillColor("#FFFFFF").font("Inter-Bold").text("SCAN INFORMATION", rightColX + 10, twoColY + 5);
-
-    const boxesY = twoColY + 20;
-    const boxesHeight = 160;
-    doc.rect(leftMargin, boxesY, colWidth, boxesHeight).strokeColor(LIGHT_BORDER).lineWidth(1).stroke();
-    doc.rect(rightColX, boxesY, colWidth, boxesHeight).strokeColor(LIGHT_BORDER).lineWidth(1).stroke();
-
-    let indY = boxesY + 14;
-    if (indicatorCounts.length === 0) {
-      doc.fontSize(9).fillColor("#555").font("Inter-Italic").text("No common risk patterns detected.", leftMargin + 12, indY, { width: colWidth - 24 });
-    } else {
-      indicatorCounts.forEach((ind) => {
-        doc.fontSize(9).fillColor("#222").font("Inter-Bold").text(ind.label, leftMargin + 12, indY, { width: colWidth - 60 });
-        doc.fontSize(11).fillColor(RED).font("Inter-Bold").text(String(ind.count), leftMargin + colWidth - 40, indY, { width: 28, align: "right" });
-        doc.fontSize(7.5).fillColor("#777").font("Inter").text(ind.desc, leftMargin + 12, doc.y, { width: colWidth - 24 });
-        indY = doc.y + 10;
-      });
-    }
-
-    let infoY = boxesY + 14;
-    const infoRows = [
-      { label: "Scan Time", value: scanTime },
-      { label: "Analysis Engine", value: "J-SEY Risk Engine" },
-      { label: "Data Sources", value: "On-chain + Heuristics" },
-      { label: "Report Type", value: "Wallet Scan" },
-    ];
-    infoRows.forEach((row) => {
-      doc.fontSize(8.5).fillColor("#333").font("Inter-Bold").text(row.label, rightColX + 12, infoY, { width: colWidth - 24 });
-      doc.fontSize(8.5).fillColor("#555").font("Inter").text(row.value, rightColX + 12, doc.y, { width: colWidth - 24 });
-      infoY = doc.y + 10;
-    });
-
-    y = boxesY + boxesHeight + 16;
-
-    const legalTop = y;
-    doc.rect(leftMargin, legalTop, contentWidth, 70).strokeColor(LIGHT_BORDER).lineWidth(1).stroke();
-    doc.font("Inter-Italic").fontSize(7.5).fillColor("#555").text(
-      "This report reflects blockchain data available at the time of scan. J-SEY makes no claims of one hundred percent scam or honeypot detection accuracy, and this report does not constitute financial, legal, or investment advice. It is not a guarantee of safety, legitimacy, or profitability of any token or wallet referenced herein. Users act at their own risk and should conduct independent due diligence before any transaction.",
-      leftMargin + 12, legalTop + 10, { width: contentWidth - 24 }
-    );
-    doc.fontSize(8).fillColor(GRAY).font("Inter").text("jsey.dpdns.org  |  support@jsey.dpdns.org", leftMargin, legalTop + 78, { width: contentWidth, align: "center" });
-
-    if (riskyTokens.length) {
-      doc.addPage();
+    if (data.riskyTokens && data.riskyTokens.length) {
       const groups = new Map<string, any[]>();
-      for (const t of riskyTokens) {
+      for (const t of data.riskyTokens) {
         const key = t.chain || "Unknown Chain";
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key)!.push(t);
       }
-      let firstGroup = true;
-      const indentX = leftMargin + 14;
+
       for (const [chainName, tokens] of groups) {
-        if (!firstGroup) {
-          if (doc.y > pageHeight - 120) doc.addPage();
-          else doc.moveDown(1);
-        }
-        firstGroup = false;
-        doc.font("Inter-Bold").fontSize(13).fillColor(NAVY).text(`${chainName} — Risky Tokens (${tokens.length})`, leftMargin, doc.y);
+        doc.addPage();
+        doc.font("Inter-Bold").fontSize(13).fillColor(NAVY).text(`${chainName} — Risky Tokens (${tokens.length})`);
         doc.moveDown(0.4);
+
+        const leftMargin = 50;
+        const indentX = leftMargin + 14;
         tokens.forEach((t: any) => {
           if (doc.y > pageHeight - 100) doc.addPage();
-          const rColor = t.riskLevel === "HIGH" ? RED : t.riskLevel === "MEDIUM" ? GOLD : GREEN;
+          const rColor = t.riskLevel === "HIGH" ? "#c0392b" : t.riskLevel === "MEDIUM" ? "#b8860b" : "#2e7d32";
           doc.x = leftMargin;
           doc.fontSize(10).fillColor("#111").font("Inter-Bold").text(`${t.tokenName || t.token} (${t.tokenSymbol || ""}) `, leftMargin, doc.y, { continued: true });
           doc.fillColor(rColor).text(t.riskLevel);
@@ -710,6 +506,16 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
       }
     }
   }
+
+  if (doc.y > pageHeight - 150) doc.addPage();
+  doc.moveDown(1.5);
+  const boxTop = doc.y;
+  const boxHeight = 90;
+  doc.rect(50, boxTop, pageWidth - 100, boxHeight).lineWidth(1).strokeColor("#ccc").stroke();
+  doc.font("Inter-Italic").fontSize(8).fillColor("#555").text(
+    "This report reflects blockchain data available at the time of scan. J-SEY makes no claims of one hundred percent scam or honeypot detection accuracy, and this report does not constitute financial, legal, or investment advice. It is not a guarantee of safety, legitimacy, or profitability of any token or wallet referenced herein. Users act at their own risk and should conduct independent due diligence before any transaction.",
+    62, boxTop + 16, { width: pageWidth - 124 }
+  );
 
   doc.end();
   await done;
