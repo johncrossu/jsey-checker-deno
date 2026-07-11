@@ -397,7 +397,8 @@ if (url.pathname === "/buy-sell-simulation") {
 
 async function generatePdfReport(data: any, reportType: string): Promise<Uint8Array> {
   const { default: PDFDocument } = await import("npm:pdfkit");
-  const NAVY = "#0A1A4A";
+  const NAVY = "#0052FF";
+  const GOLD = "#FFD12F";
   const doc = new PDFDocument({ margin: 50, size: "A4" });
   doc.registerFont("Inter", "fonts/Inter-Regular.ttf");
   doc.registerFont("Inter-Bold", "fonts/Inter-Bold.ttf");
@@ -410,28 +411,21 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
   const pageHeight = doc.page.height;
 
   function drawWatermark() {
-    const wmWidth = 260;
-    const wmHeight = wmWidth * (890 / 993);
     doc.save();
-    doc.rotate(-28, { origin: [pageWidth / 2, pageHeight / 2] });
-    doc.image("assets/jsey-watermark.png", pageWidth / 2 - wmWidth / 2, pageHeight / 2 - wmHeight / 2, { width: wmWidth, height: wmHeight });
+    doc.rotate(-45, { origin: [pageWidth / 2, pageHeight / 2] });
+    doc.fontSize(80).font("Inter-Bold").fillColor(NAVY).fillOpacity(0.06);
+    doc.text("J-SEY", 0, pageHeight / 2 - 40, { width: pageWidth, align: "center" });
+    doc.fillOpacity(1);
     doc.restore();
   }
   drawWatermark();
   doc.on("pageAdded", drawWatermark);
 
-  const lhWidth = 140;
-  const lhHeight = lhWidth * (890 / 993);
-  const lhX = (pageWidth - lhWidth) / 2;
-  const lhY = 28;
-  doc.image("assets/jsey-letterhead.png", lhX, lhY, { width: lhWidth, height: lhHeight });
-
-  const ruleY = lhY + lhHeight + 12;
-  const rule = doc.linearGradient(50, ruleY, pageWidth - 50, ruleY);
-  rule.stop(0, "#0A1A4A").stop(0.5, "#3A6ED0").stop(1, "#0A1A4A");
-  doc.rect(50, ruleY, pageWidth - 100, 2.5).fill(rule);
-
-  doc.y = ruleY + 18;
+  doc.rect(0, 0, pageWidth, 110).fill(NAVY);
+  doc.fillColor("#FFFFFF").fontSize(28).font("Inter-Bold").text("J-SEY", 50, 35, { continued: true });
+  doc.font("Inter").fontSize(18).fillColor("#DCE6FF").text("  Risk Report");
+  doc.rect(0, 110, pageWidth, 4).fill(GOLD);
+  doc.y = 135;
   doc.x = 50;
 
   doc.fontSize(9).fillColor("#888").font("Inter");
@@ -474,30 +468,18 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
     doc.text(`Tokens checked: ${data.tokensChecked ?? "N/A"}`);
     doc.text(`Risky tokens found: ${data.riskyCount ?? "N/A"}`);
     doc.moveDown(0.5);
-
     if (data.riskyTokens && data.riskyTokens.length) {
-      const groups = new Map<string, any[]>();
-      for (const t of data.riskyTokens) {
-        const key = t.chain || "Unknown Chain";
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key)!.push(t);
-      }
-
-      for (const [chainName, tokens] of groups) {
-        doc.addPage();
-        doc.font("Inter-Bold").fontSize(13).fillColor(NAVY).text(`${chainName} — Risky Tokens (${tokens.length})`);
-        doc.moveDown(0.4);
-
-        tokens.forEach((t: any) => {
-          if (doc.y > pageHeight - 100) doc.addPage();
-          const rColor = t.riskLevel === "HIGH" ? "#c0392b" : t.riskLevel === "MEDIUM" ? "#b8860b" : "#2e7d32";
-          doc.fontSize(10).fillColor("#111").font("Inter-Bold").text(`${t.tokenName || t.token} (${t.tokenSymbol || ""}) `, { continued: true });
-          doc.fillColor(rColor).text(t.riskLevel);
-          doc.font("Inter").fillColor("#555");
-          if (t.reasons) t.reasons.forEach((r: string) => doc.fontSize(9).text(`   - ${r}`));
-          doc.moveDown(0.3);
-        });
-      }
+      doc.font("Inter-Bold").fontSize(12).fillColor(NAVY).text("Risky Tokens:");
+      doc.font("Inter");
+      data.riskyTokens.forEach((t: any) => {
+        if (doc.y > pageHeight - 120) doc.addPage();
+        const rColor = t.riskLevel === "HIGH" ? "#c0392b" : t.riskLevel === "MEDIUM" ? "#b8860b" : "#2e7d32";
+        doc.fontSize(10).fillColor("#111").font("Inter-Bold").text(`${t.tokenName || t.token} (${t.tokenSymbol || ""}) `, { continued: true });
+        doc.fillColor(rColor).text(t.riskLevel);
+        doc.font("Inter").fillColor("#555");
+        if (t.reasons) t.reasons.forEach((r: string) => doc.fontSize(9).text(`   - ${r}`));
+        doc.moveDown(0.3);
+      });
     }
   }
 
@@ -506,9 +488,10 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
   const boxTop = doc.y;
   const boxHeight = 90;
   doc.rect(50, boxTop, pageWidth - 100, boxHeight).lineWidth(1).strokeColor("#ccc").stroke();
+  doc.fontSize(9).font("Inter-Bold").fillColor(NAVY).text("Legal Notice", 62, boxTop + 10);
   doc.font("Inter-Italic").fontSize(8).fillColor("#555").text(
     "This report reflects blockchain data available at the time of scan. J-SEY makes no claims of one hundred percent scam or honeypot detection accuracy, and this report does not constitute financial, legal, or investment advice. It is not a guarantee of safety, legitimacy, or profitability of any token or wallet referenced herein. Users act at their own risk and should conduct independent due diligence before any transaction.",
-    62, boxTop + 16, { width: pageWidth - 124 }
+    62, boxTop + 26, { width: pageWidth - 124 }
   );
 
   doc.end();
