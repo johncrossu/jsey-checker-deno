@@ -466,7 +466,6 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
     );
     const barY = legalTop + 70 + 10;
     const barHeight = 26;
-    const ICON_BLUE = "#6EC1E4";
     doc.rect(leftMargin, barY, contentWidth, barHeight).fillColor(NAVY).fill();
     const websiteText = "jsey.dpdns.org";
     const emailText = "support@jsey.dpdns.org";
@@ -476,14 +475,14 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
     const textY = barY + (barHeight - 8) / 2;
     const wClusterWidth = 16 + wTextWidth;
     const eClusterWidth = 16 + eTextWidth;
-    const gapBetween = 65;
+    const gapBetween = 40;
     const totalGroupWidth = wClusterWidth + gapBetween + eClusterWidth;
     const groupStartX = leftMargin + (contentWidth - totalGroupWidth) / 2;
     const wStartX = groupStartX;
-    drawGlobeIcon(wStartX + 6, barY + barHeight / 2, 6, ICON_BLUE);
+    drawGlobeIcon(wStartX + 6, barY + barHeight / 2, 6, "#FFFFFF");
     doc.fillColor("#FFFFFF").text(websiteText, wStartX + 16, textY, { width: wTextWidth + 5 });
     const eStartX = groupStartX + wClusterWidth + gapBetween;
-    drawEnvelopeIcon(eStartX, barY + barHeight / 2 - 5, 12, 8, ICON_BLUE);
+    drawEnvelopeIcon(eStartX, barY + barHeight / 2 - 5, 12, 8, "#FFFFFF");
     doc.fillColor("#FFFFFF").text(emailText, eStartX + 16, textY, { width: eTextWidth + 5 });
   }
 

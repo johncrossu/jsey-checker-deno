@@ -440,21 +440,15 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
 
   function drawGlobeIcon(cx: number, cy: number, r: number, color: string = GRAY) {
     doc.save();
-    doc.lineWidth(0.75).strokeColor(color);
-    doc.circle(cx, cy, r).stroke();
-    doc.moveTo(cx - r, cy).lineTo(cx + r, cy).stroke();
-    doc.moveTo(cx, cy - r).lineTo(cx, cy + r).stroke();
-    doc.ellipse(cx, cy, r * 0.45, r).stroke();
-    doc.ellipse(cx, cy, r * 0.85, r * 0.4).stroke();
+    doc.circle(cx, cy, r).lineWidth(0.75).strokeColor(color).stroke();
+    doc.moveTo(cx - r, cy).lineTo(cx + r, cy).strokeColor(color).lineWidth(0.75).stroke();
+    doc.ellipse(cx, cy, r * 0.45, r).strokeColor(color).lineWidth(0.75).stroke();
     doc.restore();
   }
   function drawEnvelopeIcon(x: number, y: number, w: number, h: number, color: string = GRAY) {
     doc.save();
-    doc.lineWidth(0.75).strokeColor(color);
-    doc.rect(x, y, w, h).stroke();
-    doc.moveTo(x, y).lineTo(x + w / 2, y + h * 0.62).lineTo(x + w, y).stroke();
-    doc.moveTo(x, y + h).lineTo(x + w * 0.38, y + h * 0.48).stroke();
-    doc.moveTo(x + w, y + h).lineTo(x + w * 0.62, y + h * 0.48).stroke();
+    doc.rect(x, y, w, h).lineWidth(0.75).strokeColor(color).stroke();
+    doc.moveTo(x, y).lineTo(x + w / 2, y + h * 0.6).lineTo(x + w, y).strokeColor(color).lineWidth(0.75).stroke();
     doc.restore();
   }
 
@@ -466,7 +460,6 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
     );
     const barY = legalTop + 70 + 10;
     const barHeight = 26;
-    const ICON_BLUE = "#6EC1E4";
     doc.rect(leftMargin, barY, contentWidth, barHeight).fillColor(NAVY).fill();
     const websiteText = "jsey.dpdns.org";
     const emailText = "support@jsey.dpdns.org";
@@ -474,16 +467,11 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
     const wTextWidth = doc.widthOfString(websiteText);
     const eTextWidth = doc.widthOfString(emailText);
     const textY = barY + (barHeight - 8) / 2;
-    const wClusterWidth = 16 + wTextWidth;
-    const eClusterWidth = 16 + eTextWidth;
-    const gapBetween = 65;
-    const totalGroupWidth = wClusterWidth + gapBetween + eClusterWidth;
-    const groupStartX = leftMargin + (contentWidth - totalGroupWidth) / 2;
-    const wStartX = groupStartX;
-    drawGlobeIcon(wStartX + 6, barY + barHeight / 2, 6, ICON_BLUE);
+    const wStartX = leftMargin + 14;
+    drawGlobeIcon(wStartX + 6, barY + barHeight / 2, 6, "#FFFFFF");
     doc.fillColor("#FFFFFF").text(websiteText, wStartX + 16, textY, { width: wTextWidth + 5 });
-    const eStartX = groupStartX + wClusterWidth + gapBetween;
-    drawEnvelopeIcon(eStartX, barY + barHeight / 2 - 5, 12, 8, ICON_BLUE);
+    const eStartX = rightMargin - 14 - eTextWidth - 16;
+    drawEnvelopeIcon(eStartX, barY + barHeight / 2 - 5, 12, 8, "#FFFFFF");
     doc.fillColor("#FFFFFF").text(emailText, eStartX + 16, textY, { width: eTextWidth + 5 });
   }
 

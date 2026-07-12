@@ -438,23 +438,17 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
   drawWatermark();
   doc.on("pageAdded", drawWatermark);
 
-  function drawGlobeIcon(cx: number, cy: number, r: number, color: string = GRAY) {
+  function drawGlobeIcon(cx: number, cy: number, r: number) {
     doc.save();
-    doc.lineWidth(0.75).strokeColor(color);
-    doc.circle(cx, cy, r).stroke();
-    doc.moveTo(cx - r, cy).lineTo(cx + r, cy).stroke();
-    doc.moveTo(cx, cy - r).lineTo(cx, cy + r).stroke();
-    doc.ellipse(cx, cy, r * 0.45, r).stroke();
-    doc.ellipse(cx, cy, r * 0.85, r * 0.4).stroke();
+    doc.circle(cx, cy, r).lineWidth(0.75).strokeColor(GRAY).stroke();
+    doc.moveTo(cx - r, cy).lineTo(cx + r, cy).strokeColor(GRAY).lineWidth(0.75).stroke();
+    doc.ellipse(cx, cy, r * 0.45, r).strokeColor(GRAY).lineWidth(0.75).stroke();
     doc.restore();
   }
-  function drawEnvelopeIcon(x: number, y: number, w: number, h: number, color: string = GRAY) {
+  function drawEnvelopeIcon(x: number, y: number, w: number, h: number) {
     doc.save();
-    doc.lineWidth(0.75).strokeColor(color);
-    doc.rect(x, y, w, h).stroke();
-    doc.moveTo(x, y).lineTo(x + w / 2, y + h * 0.62).lineTo(x + w, y).stroke();
-    doc.moveTo(x, y + h).lineTo(x + w * 0.38, y + h * 0.48).stroke();
-    doc.moveTo(x + w, y + h).lineTo(x + w * 0.62, y + h * 0.48).stroke();
+    doc.rect(x, y, w, h).lineWidth(0.75).strokeColor(GRAY).stroke();
+    doc.moveTo(x, y).lineTo(x + w / 2, y + h * 0.6).lineTo(x + w, y).strokeColor(GRAY).lineWidth(0.75).stroke();
     doc.restore();
   }
 
@@ -464,27 +458,19 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
       "This report reflects blockchain data available at the time of scan. J-SEY makes no claims of one hundred percent scam or honeypot detection accuracy, and this report does not constitute financial, legal, or investment advice. It is not a guarantee of safety, legitimacy, or profitability of any token or wallet referenced herein. Users act at their own risk and should conduct independent due diligence before any transaction.",
       leftMargin + 12, legalTop + 10, { width: contentWidth - 24 }
     );
-    const barY = legalTop + 70 + 10;
-    const barHeight = 26;
-    const ICON_BLUE = "#6EC1E4";
-    doc.rect(leftMargin, barY, contentWidth, barHeight).fillColor(NAVY).fill();
     const websiteText = "jsey.dpdns.org";
     const emailText = "support@jsey.dpdns.org";
     doc.fontSize(8).font("Inter");
     const wTextWidth = doc.widthOfString(websiteText);
+    const wLineY = legalTop + 78;
+    const wStartX = leftMargin + (contentWidth - (16 + 6 + wTextWidth)) / 2;
+    drawGlobeIcon(wStartX + 6, wLineY + 4, 6);
+    doc.fillColor(GRAY).text(websiteText, wStartX + 16, wLineY, { width: wTextWidth + 5 });
     const eTextWidth = doc.widthOfString(emailText);
-    const textY = barY + (barHeight - 8) / 2;
-    const wClusterWidth = 16 + wTextWidth;
-    const eClusterWidth = 16 + eTextWidth;
-    const gapBetween = 65;
-    const totalGroupWidth = wClusterWidth + gapBetween + eClusterWidth;
-    const groupStartX = leftMargin + (contentWidth - totalGroupWidth) / 2;
-    const wStartX = groupStartX;
-    drawGlobeIcon(wStartX + 6, barY + barHeight / 2, 6, ICON_BLUE);
-    doc.fillColor("#FFFFFF").text(websiteText, wStartX + 16, textY, { width: wTextWidth + 5 });
-    const eStartX = groupStartX + wClusterWidth + gapBetween;
-    drawEnvelopeIcon(eStartX, barY + barHeight / 2 - 5, 12, 8, ICON_BLUE);
-    doc.fillColor("#FFFFFF").text(emailText, eStartX + 16, textY, { width: eTextWidth + 5 });
+    const eLineY = wLineY + 14;
+    const eStartX = leftMargin + (contentWidth - (16 + 6 + eTextWidth)) / 2;
+    drawEnvelopeIcon(eStartX, eLineY - 2, 12, 8);
+    doc.fillColor(GRAY).text(emailText, eStartX + 16, eLineY, { width: eTextWidth + 5 });
   }
 
   const lhWidth = 110;
@@ -586,7 +572,7 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
     doc.fontSize(8).fillColor("#888").font("Inter").text(`Scan time: ${scanTime}`, leftMargin, doc.y);
     doc.moveDown(0.8);
 
-    if (doc.y > pageHeight - 180) doc.addPage();
+    if (doc.y > pageHeight - 160) doc.addPage();
     drawFooterWithIcons(doc.y);
 
   } else if (reportType === "wallet") {
@@ -749,7 +735,7 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
       }
     }
 
-    if (doc.y > pageHeight - 170) doc.addPage();
+    if (doc.y > pageHeight - 150) doc.addPage();
     const legalTop = doc.y;
     drawFooterWithIcons(legalTop);
   }
