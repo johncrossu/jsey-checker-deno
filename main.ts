@@ -105,6 +105,8 @@ async function resolveTokenAddressByName(query: string, chainId: string): Promis
   return found;
 }
 
+const DEXSCREENER_CHAIN: Record<string, string> = { "1": "ethereum", "56": "bsc", "8453": "base", "137": "polygon", "42161": "arbitrum", "10": "optimism", "43114": "avalanche", "42220": "celo", "59144": "linea", "324": "zksync" };
+
 async function getTokenLogo(address: string, chainId: string): Promise<string | null> {
   const cacheKey = ["tokenlogo", chainId, address.toLowerCase()];
   const cached = await kv.get<string | null>(cacheKey);
@@ -115,8 +117,31 @@ async function getTokenLogo(address: string, chainId: string): Promise<string | 
     const data: any = await httpGetJson(`https://api.coingecko.com/api/v3/coins/${platform}/contract/${address.toLowerCase()}`);
     if (data?.image?.small) logo = data.image.small;
   }
+  if (!logo) {
+    const dsSlug = DEXSCREENER_CHAIN[chainId];
+    if (dsSlug) {
+      const dsData: any = await httpGetJson(`https://api.dexscreener.com/tokens/v1/${dsSlug}/${address}`);
+      const pairs = Array.isArray(dsData) ? dsData : [];
+      for (const pr of pairs) {
+        if (pr?.info?.imageUrl) { logo = pr.info.imageUrl; break; }
+      }
+    }
+  }
   await kv.set(cacheKey, logo, { expireIn: CACHE_TTL_MS });
   return logo;
+}
+
+async function getHoneypotCheck(address: string, chainId: string): Promise<{ isHoneypot: boolean; liquidityUsd: number | null } | null> {
+  const cacheKey = ["honeypotcheck", chainId, address.toLowerCase()];
+  const cached = await kv.get<any>(cacheKey);
+  if (cached && cached.versionstamp !== null) return cached.value;
+  const data: any = await httpGetJson(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
+  let result: { isHoneypot: boolean; liquidityUsd: number | null } | null = null;
+  if (data && data.honeypotResult) {
+    result = { isHoneypot: !!data.honeypotResult.isHoneypot, liquidityUsd: data.pair && typeof data.pair.liquidity === "number" ? data.pair.liquidity : null };
+  }
+  await kv.set(cacheKey, result, { expireIn: CACHE_TTL_MS });
+  return result;
 }
 
 async function getLiveAllowance(rpcUrl: string, tokenAddress: string, owner: string, spender: string): Promise<bigint> {
@@ -227,7 +252,7 @@ async function checkGoPlus(address: string, chainId: string): Promise<GoPlusResu
   return parsed;
 }
 
-function computeRisk(goPlusData: any, deployerData: any) {
+function computeRisk(goPlusData: any, deployerData: any, honeypotCheck: any = null) {
   let riskPoints = 0;
   const reasons: string[] = [];
   if (goPlusData) {
@@ -237,6 +262,10 @@ function computeRisk(goPlusData: any, deployerData: any) {
     if (!goPlusData.ownershipRenounced) { riskPoints += 15; reasons.push("Ownership has not been renounced — deployer retains control."); }
     if (goPlusData.top10HoldersPercent !== null && goPlusData.top10HoldersPercent > 50) { riskPoints += 20; reasons.push(`Top 10 holders control ${goPlusData.top10HoldersPercent.toFixed(1)}% of supply.`); }
     if (parseFloat(goPlusData.sellTax) > 0.1) { riskPoints += 15; reasons.push(`High sell tax of ${(goPlusData.sellTax * 100).toFixed(1)}% detected.`); }
+  }
+  if (honeypotCheck) {
+    if (honeypotCheck.isHoneypot && !(goPlusData && goPlusData.isHoneypot)) { riskPoints += 50; reasons.push("Independent honeypot simulation (honeypot.is) confirms this token cannot be resold."); }
+    if (typeof honeypotCheck.liquidityUsd === "number" && honeypotCheck.liquidityUsd < 1000) { riskPoints += 15; reasons.push(`Very low real liquidity ($${honeypotCheck.liquidityUsd.toFixed(0)}) — high risk of price manipulation.`); }
   }
   if (deployerData && deployerData.isSerialRugger) {
     riskPoints += 35;
@@ -396,9 +425,10 @@ Deno.serve({ port: Number(Deno.env.get("PORT")) || 8000 }, async (req) => {
     }
     if (!address) return json({ error: "Missing or unresolved token address/name" }, 400);
     const goPlusData = await checkGoPlus(address, chainId);
+    const honeypotCheck = await getHoneypotCheck(address, chainId);
     let deployerData = null;
     if (isPaid) deployerData = await checkDeployerHistory(address, chainId);
-    const risk = computeRisk(goPlusData, deployerData);
+    const risk = computeRisk(goPlusData, deployerData, honeypotCheck);
     const tokenName = goPlusData?.tokenName || "";
     const tokenSymbol = goPlusData?.tokenSymbol || "";
     const tokenLogo = await getTokenLogo(address, chainId);
@@ -422,8 +452,9 @@ Deno.serve({ port: Number(Deno.env.get("PORT")) || 8000 }, async (req) => {
     const riskyTokens: any[] = [];
     for (const tInfo of uniqueTokens) {
       const gp = await checkGoPlus(tInfo.address, chainId);
-      if (gp) {
-        const r = computeRisk(gp, null);
+      const honeypotCheck = await getHoneypotCheck(tInfo.address, chainId);
+      if (gp || (honeypotCheck && honeypotCheck.isHoneypot)) {
+        const r = computeRisk(gp, null, honeypotCheck);
         if (r.reasons.length > 0) {
           const entry: any = { token: tInfo.address, tokenName: tInfo.name, tokenSymbol: tInfo.symbol, riskLevel: r.level, tokenLogo: await getTokenLogo(tInfo.address, chainId) };
           if (isPaid) { entry.reasons = r.reasons; entry.approvals = await getActiveApprovals(wallet, tInfo.address, chainId); }
