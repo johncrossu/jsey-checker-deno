@@ -730,22 +730,58 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key)!.push(t);
       }
+      const CHAIN_COLORS: Record<string, string> = {
+        "ETHEREUM": "#627EEA",
+        "BNB CHAIN": "#F3BA2F",
+        "BSC": "#F3BA2F",
+        "BASE": "#0052FF",
+        "POLYGON": "#8247E5",
+        "OPTIMISM": "#FF0420",
+        "ARBITRUM": "#28A0F0",
+        "LINEA": "#121212",
+      };
+      function autoChainColor(name: string): string {
+        let hash = 0;
+        for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+        const hue = hash % 360;
+        const c = Math.round(0.65 * 255);
+        function hslToRgb(h: number, s: number, l: number) {
+          const a = s * Math.min(l, 1 - l);
+          const f = (n: number) => {
+            const k = (n + h / 30) % 12;
+            return l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+          };
+          return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+        }
+        const [r, g, b] = hslToRgb(hue, 0.65, 0.42);
+        return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+      }
       for (const [chainName, tokens] of groups) {
-        for (const t of tokens) {
-          doc.addPage();
-          doc.x = leftMargin;
-          doc.y = doc.page.margins.top;
-          doc.fontSize(8).fillColor(GRAY).font("Inter-Bold").text(chainName.toUpperCase(), leftMargin, doc.y);
-          doc.moveDown(0.4);
+        doc.addPage();
+        doc.x = leftMargin;
+        const chainKey = chainName.toUpperCase();
+        const chainColor = CHAIN_COLORS[chainKey] || autoChainColor(chainKey);
+        doc.font("Inter-Bold").fontSize(16);
+        const chainLabelWidth = doc.widthOfString(chainName.toUpperCase());
+        doc.fillColor(chainColor).text(chainName.toUpperCase(), leftMargin, doc.y);
+        const underlineY = doc.y + 2;
+        doc.rect(leftMargin, underlineY, chainLabelWidth, 3).fillColor(chainColor).fill();
+        doc.moveDown(0.6);
+        doc.font("Inter-Bold").fontSize(11).fillColor(GRAY).text(`Risky Tokens (${tokens.length})`, leftMargin, doc.y);
+        doc.moveDown(0.4);
+        tokens.forEach((t: any) => {
+          if (doc.y > pageHeight - 100) doc.addPage();
           const rColor = t.riskLevel === "HIGH" ? RED : t.riskLevel === "MEDIUM" ? GOLD : GREEN;
-          doc.fontSize(13).fillColor("#111").font("Inter-Bold").text(`${sanitizeText(t.tokenName || t.token)} (${sanitizeText(t.tokenSymbol || "")}) `, leftMargin, doc.y, { continued: true });
+          doc.x = leftMargin;
+          doc.fontSize(11).fillColor("#111").font("Inter-Bold").text(`${sanitizeText(t.tokenName || t.token)} (${sanitizeText(t.tokenSymbol || "")}) `, leftMargin, doc.y, { continued: true });
           doc.fillColor(rColor).text(t.riskLevel);
           doc.font("Inter").fillColor("#555");
-          doc.moveDown(0.3);
           if (t.reasons) t.reasons.forEach((r: string) => {
-            doc.fontSize(10).text(`- ${sanitizeText(r)}`, leftMargin + 14, doc.y, { width: contentWidth - 14 });
+            doc.fontSize(9).text(`- ${sanitizeText(r)}`, leftMargin + 14, doc.y, { width: contentWidth - 14 });
           });
-        }
+          doc.x = leftMargin;
+          doc.moveDown(0.3);
+        });
       }
     }
 

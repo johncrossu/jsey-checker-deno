@@ -1,0 +1,13 @@
+import PDFDocument from "npm:pdfkit";
+const doc = new PDFDocument();
+const chunks: Uint8Array[] = [];
+doc.on("data", (c: Uint8Array) => chunks.push(c));
+const done = new Promise<void>((resolve) => doc.on("end", () => resolve()));
+doc.registerFont("Test", "fonts/NotoSans-Regular.ttf");
+doc.font("Test").fontSize(14).text("Token is flagged as financial officials profitability", 50, 50, { features: [] });
+doc.text("Token is flagged as financial officials profitability", 50, 100, { features: ["-liga"] });
+doc.end();
+await done;
+const buf = new Uint8Array(await new Blob(chunks).arrayBuffer());
+await Deno.writeFile("ligatest.pdf", buf);
+console.log("WROTE", buf.length, "bytes");
