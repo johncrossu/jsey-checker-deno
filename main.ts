@@ -63,9 +63,75 @@ function dedupeTokenInfo(list: TokenInfo[]): TokenInfo[] {
   return [...seen.values()].filter((t) => !isSystemContractAddress(t.address)).slice(0, 40);
 }
 
+class ChainScanError extends Error {}
+
+function isRateLimitOrError(data: any): boolean {
+  if (!data) return true;
+  if (typeof data.result === "string") return true;
+  if (data.status === "0" && data.message && data.message !== "No transactions found") return true;
+  return false;
+}
+
+async function fetchWithRetry(url: string, label: string): Promise<any> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const data: any = await httpGetJson(url);
+    if (!isRateLimitOrError(data)) return data;
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  throw new ChainScanError(`${label} failed after retry (rate-limited or errored)`);
+}
+
+function looksLikeAddress(s: string): boolean {
+  return /^0x[a-fA-F0-9]{40}$/.test(s);
+}
+
+const COINGECKO_PLATFORM: Record<string, string> = { "1": "ethereum", "56": "binance-smart-chain", "8453": "base", "137": "polygon-pos", "42161": "arbitrum-one", "10": "optimistic-ethereum", "43114": "avalanche", "42220": "celo", "59144": "linea", "324": "zksync" };
+
+async function resolveTokenAddressByName(query: string, chainId: string): Promise<string | null> {
+  const cacheKey = ["nameresolve", chainId, query.toLowerCase()];
+  const cached = await kv.get<string | null>(cacheKey);
+  if (cached && cached.versionstamp !== null) return cached.value;
+  const data: any = await httpGetJson(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}`);
+  const coins = Array.isArray(data?.coins) ? data.coins : [];
+  const platform = COINGECKO_PLATFORM[chainId];
+  let found: string | null = null;
+  for (const cn of coins.slice(0, 5)) {
+    const detail: any = await httpGetJson(`https://api.coingecko.com/api/v3/coins/${cn.id}?localization=false&tickers=false&market_data=false&community_data=false&developer_data=false`);
+    const addr = detail?.platforms?.[platform];
+    if (addr) { found = addr; break; }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  await kv.set(cacheKey, found, { expireIn: CACHE_TTL_MS });
+  return found;
+}
+
+async function getTokenLogo(address: string, chainId: string): Promise<string | null> {
+  const cacheKey = ["tokenlogo", chainId, address.toLowerCase()];
+  const cached = await kv.get<string | null>(cacheKey);
+  if (cached && cached.versionstamp !== null) return cached.value;
+  const platform = COINGECKO_PLATFORM[chainId];
+  let logo: string | null = null;
+  if (platform) {
+    const data: any = await httpGetJson(`https://api.coingecko.com/api/v3/coins/${platform}/contract/${address.toLowerCase()}`);
+    if (data?.image?.small) logo = data.image.small;
+  }
+  await kv.set(cacheKey, logo, { expireIn: CACHE_TTL_MS });
+  return logo;
+}
+
+async function getLiveAllowance(rpcUrl: string, tokenAddress: string, owner: string, spender: string): Promise<bigint> {
+  const selector = "0xdd62ed3e";
+  const ownerPadded = owner.toLowerCase().replace("0x", "").padStart(64, "0");
+  const spenderPadded = spender.toLowerCase().replace("0x", "").padStart(64, "0");
+  const data = selector + ownerPadded + spenderPadded;
+  const result = await rpcCall(rpcUrl, "eth_call", [{ to: tokenAddress, data }, "latest"]);
+  if (!result || result === "0x") return 0n;
+  try { return BigInt(result); } catch { return 0n; }
+}
+
 async function getWalletTokenTransfers(wallet: string, chainId: string): Promise<TokenInfo[]> {
   if (chainId === "56") {
-    if (!NODEREAL_KEY) return [];
+    if (!NODEREAL_KEY) throw new ChainScanError("Missing NODEREAL_KEY for BSC");
     const rpcUrl = `https://bsc-mainnet.nodereal.io/v1/${NODEREAL_KEY}`;
     const found: TokenInfo[] = [];
     for (const addrField of ["fromAddress", "toAddress"]) {
@@ -75,13 +141,20 @@ async function getWalletTokenTransfers(wallet: string, chainId: string): Promise
         const params: any = { category: ["20"] };
         params[addrField] = wallet;
         if (pageKey) params.pageKey = pageKey;
-        try {
-          const res = await fetch(rpcUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", method: "nr_getAssetTransfers", params: [params], id: 1 }) });
-          const data: any = await res.json();
-          const transfers = data.result && data.result.transfers ? data.result.transfers : [];
-          transfers.forEach((t: any) => { if (t.contractAddress) found.push({ address: t.contractAddress, name: t.name || "", symbol: t.asset || "" }); });
-          pageKey = data.result ? data.result.pageKey : null;
-        } catch (e) { pageKey = null; }
+        let data: any = null;
+        let ok = false;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const res = await fetch(rpcUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", method: "nr_getAssetTransfers", params: [params], id: 1 }) });
+            data = await res.json();
+            if (!data.error) { ok = true; break; }
+          } catch (e) { data = null; }
+          await new Promise((r) => setTimeout(r, 800));
+        }
+        if (!ok) throw new ChainScanError("BSC NodeReal call failed after retry");
+        const transfers = data.result && data.result.transfers ? data.result.transfers : [];
+        transfers.forEach((t: any) => { if (t.contractAddress) found.push({ address: t.contractAddress, name: t.name || "", symbol: t.asset || "" }); });
+        pageKey = data.result ? data.result.pageKey : null;
         pages++;
         await new Promise((r) => setTimeout(r, 150));
       } while (pageKey && pages < 5);
@@ -90,16 +163,16 @@ async function getWalletTokenTransfers(wallet: string, chainId: string): Promise
   }
   if (chainId in BLOCKSCOUT_DOMAINS) {
     const domain = BLOCKSCOUT_DOMAINS[chainId];
-    const data: any = await httpGetJson(`https://${domain}/api?module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc`);
+    const data: any = await fetchWithRetry(`https://${domain}/api?module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc`, `Blockscout(${domain})`);
     const transfers = Array.isArray(data?.result) ? data.result : [];
     return dedupeTokenInfo(transfers.map((t: any) => ({ address: t.contractAddress, name: t.tokenName || "", symbol: t.tokenSymbol || "" })));
   }
   if (chainId in ROUTESCAN_CHAINS) {
-    const data: any = await httpGetJson(`https://api.routescan.io/v2/network/mainnet/evm/${chainId}/etherscan/api?module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc`);
+    const data: any = await fetchWithRetry(`https://api.routescan.io/v2/network/mainnet/evm/${chainId}/etherscan/api?module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc`, `Routescan(${chainId})`);
     const transfers = Array.isArray(data?.result) ? data.result : [];
     return dedupeTokenInfo(transfers.map((t: any) => ({ address: t.contractAddress, name: t.tokenName || "", symbol: t.tokenSymbol || "" })));
   }
-  const data: any = await httpGetJson(`https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc&apikey=${ETHERSCAN_KEY}`);
+  const data: any = await fetchWithRetry(`https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=tokentx&address=${wallet}&page=1&offset=1000&sort=desc&apikey=${ETHERSCAN_KEY}`, `Etherscan(chain ${chainId})`);
   const transfers = Array.isArray(data?.result) ? data.result : [];
   return dedupeTokenInfo(transfers.map((t: any) => ({ address: t.contractAddress, name: t.tokenName || "", symbol: t.tokenSymbol || "" })));
 }
@@ -219,7 +292,13 @@ async function getActiveApprovals(walletAddress: string, tokenAddress: string, c
         bnbLatestBySpender[spender] = BigInt(log.data);
       }
     }
-    return Object.entries(bnbLatestBySpender).filter(([, amt]) => amt > 0n).map(([spender, amt]) => ({ spender, amountAtomic: amt.toString() }));
+    const bnbConfirmed: { spender: string; amountAtomic: string }[] = [];
+    for (const spender of Object.keys(bnbLatestBySpender)) {
+      const live = await getLiveAllowance(rpcUrl, tokenAddress, walletAddress, spender);
+      if (live > 0n) bnbConfirmed.push({ spender, amountAtomic: live.toString() });
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return bnbConfirmed;
   }
 
   let apiUrl: string;
@@ -244,7 +323,16 @@ async function getActiveApprovals(walletAddress: string, tokenAddress: string, c
       latestBySpender[spender] = BigInt(log.data);
     }
   }
-  return Object.entries(latestBySpender).filter(([, amt]) => amt > 0n).map(([spender, amt]) => ({ spender, amountAtomic: amt.toString() }));
+  const rpcUrlForChain = RPC_URLS[chainId];
+  const confirmed: { spender: string; amountAtomic: string }[] = [];
+  if (rpcUrlForChain) {
+    for (const spender of Object.keys(latestBySpender)) {
+      const live = await getLiveAllowance(rpcUrlForChain, tokenAddress, walletAddress, spender);
+      if (live > 0n) confirmed.push({ spender, amountAtomic: live.toString() });
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+  return confirmed;
 }
 
 const SOLANA_RPC = "https://api.mainnet-beta.solana.com";
@@ -299,20 +387,25 @@ Deno.serve({ port: Number(Deno.env.get("PORT")) || 8000 }, async (req) => {
   }
 
   if (url.pathname === "/token-check") {
-    const address = url.searchParams.get("address");
     const chain = url.searchParams.get("chain") || "ethereum";
     const chainId = CHAIN_IDS[chain] || "1";
-    if (!address) return json({ error: "Missing address" }, 400);
+    let address = url.searchParams.get("address");
+    const query = url.searchParams.get("query");
+    if (!address && query) {
+      address = looksLikeAddress(query) ? query : await resolveTokenAddressByName(query, chainId);
+    }
+    if (!address) return json({ error: "Missing or unresolved token address/name" }, 400);
     const goPlusData = await checkGoPlus(address, chainId);
     let deployerData = null;
     if (isPaid) deployerData = await checkDeployerHistory(address, chainId);
     const risk = computeRisk(goPlusData, deployerData);
     const tokenName = goPlusData?.tokenName || "";
     const tokenSymbol = goPlusData?.tokenSymbol || "";
+    const tokenLogo = await getTokenLogo(address, chainId);
     if (!isPaid) {
-      return json({ address, chain, tokenName, tokenSymbol, riskLevel: risk.level, summary: risk.level === "HIGH" ? "This token shows multiple high-risk warning signs." : risk.level === "MEDIUM" ? "This token shows some risk factors worth reviewing." : "No major red flags detected." });
+      return json({ address, chain, tokenName, tokenSymbol, tokenLogo, riskLevel: risk.level, summary: risk.level === "HIGH" ? "This token shows multiple high-risk warning signs." : risk.level === "MEDIUM" ? "This token shows some risk factors worth reviewing." : "No major red flags detected." });
     }
-    return json({ address, chain, tokenName, tokenSymbol, riskLevel: risk.level, riskScore: risk.riskPoints, reasons: risk.reasons, deployerData, goPlusData });
+    return json({ address, chain, tokenName, tokenSymbol, tokenLogo, riskLevel: risk.level, riskScore: risk.riskPoints, reasons: risk.reasons, deployerData, goPlusData });
   }
 
   if (url.pathname === "/wallet-scan") {
@@ -320,14 +413,19 @@ Deno.serve({ port: Number(Deno.env.get("PORT")) || 8000 }, async (req) => {
     const chain = url.searchParams.get("chain") || "ethereum";
     const chainId = CHAIN_IDS[chain] || "1";
     if (!wallet) return json({ error: "Missing wallet" }, 400);
-    const uniqueTokens = await getWalletTokenTransfers(wallet, chainId);
+    let uniqueTokens: TokenInfo[];
+    try {
+      uniqueTokens = await getWalletTokenTransfers(wallet, chainId);
+    } catch (e) {
+      return json({ wallet, chain, tokensChecked: null, riskyCount: null, error: (e as Error).message || "Scan failed for this chain, retry." });
+    }
     const riskyTokens: any[] = [];
     for (const tInfo of uniqueTokens) {
       const gp = await checkGoPlus(tInfo.address, chainId);
       if (gp) {
         const r = computeRisk(gp, null);
         if (r.reasons.length > 0) {
-          const entry: any = { token: tInfo.address, tokenName: tInfo.name, tokenSymbol: tInfo.symbol, riskLevel: r.level };
+          const entry: any = { token: tInfo.address, tokenName: tInfo.name, tokenSymbol: tInfo.symbol, riskLevel: r.level, tokenLogo: await getTokenLogo(tInfo.address, chainId) };
           if (isPaid) { entry.reasons = r.reasons; entry.approvals = await getActiveApprovals(wallet, tInfo.address, chainId); }
           riskyTokens.push(entry);
         }
