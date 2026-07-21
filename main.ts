@@ -589,8 +589,11 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
 
   function drawFooterWithIcons(legalTop: number) {
     doc.rect(leftMargin, legalTop, contentWidth, 70).lineWidth(1).strokeColor(LIGHT_BORDER).stroke();
+    const footerDisclaimer = reportType === "real-estate"
+      ? "This report reflects publicly available mapping and open-data sources at the time of scan. J-SEY makes no claims of one hundred percent accuracy regarding location, structure, or administrative details, and this report does not constitute financial, legal, or investment advice. It is not a guarantee of property ownership, valuation, or legitimacy. Users act at their own risk and should conduct independent due diligence, including verification with official land registries, before any transaction."
+      : "This report reflects blockchain data available at the time of scan. J-SEY makes no claims of one hundred percent scam or honeypot detection accuracy, and this report does not constitute financial, legal, or investment advice. It is not a guarantee of safety, legitimacy, or profitability of any token or wallet referenced herein. Users act at their own risk and should conduct independent due diligence before any transaction.";
     doc.font("Inter-Italic").fontSize(7.5).fillColor("#555").text(
-      "This report reflects blockchain data available at the time of scan. J-SEY makes no claims of one hundred percent scam or honeypot detection accuracy, and this report does not constitute financial, legal, or investment advice. It is not a guarantee of safety, legitimacy, or profitability of any token or wallet referenced herein. Users act at their own risk and should conduct independent due diligence before any transaction.",
+      footerDisclaimer,
       leftMargin + 12, legalTop + 10, { width: contentWidth - 24 }
     );
     const barY = legalTop + 70 + 10;
@@ -622,8 +625,11 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
   const lhY = 28;
   doc.image("assets/jsey-letterhead.png", lhX, lhY, { width: lhWidth, height: lhHeight });
 
+  const headerTagline = reportType === "real-estate"
+    ? "Comprehensive property location and structure verification report."
+    : "Comprehensive blockchain intelligence and risk analysis report.";
   doc.fontSize(8).fillColor(GRAY).font("Inter").text(
-    "Comprehensive blockchain intelligence and risk analysis report.",
+    headerTagline,
     leftMargin, lhY + lhHeight + 8, { width: contentWidth, align: "center" }
   );
 
@@ -724,14 +730,18 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
     doc.fontSize(14).fillColor(NAVY).font("Inter-Bold").text("Property Location Report", leftMargin, doc.y);
     doc.moveDown(0.3);
     const boxTop = doc.y;
-    doc.rect(leftMargin, boxTop, contentWidth, 90).strokeColor(LIGHT_BORDER).lineWidth(1).stroke();
     doc.fontSize(9).fillColor("#333").font("Inter");
-    doc.text("Address: " + (sanitizeText(data?.found?.displayName) || "N/A"), leftMargin + 12, boxTop + 10, { width: contentWidth - 24 });
-    doc.text("Country: " + (sanitizeText(data?.administrative?.country) || "N/A"), leftMargin + 12, boxTop + 28);
-    doc.text("State: " + (sanitizeText(data?.administrative?.state) || "N/A"), leftMargin + 12, boxTop + 44);
-    doc.text("Local Govt / Area Council: " + (sanitizeText(data?.administrative?.suburb) || "N/A"), leftMargin + 12, boxTop + 60);
-    doc.text("Plus Code: " + (sanitizeText(data?.plusCode) || "N/A"), leftMargin + 12, boxTop + 76);
-    doc.y = boxTop + 90 + 16;
+    const addressText = "Address: " + (sanitizeText(data?.found?.displayName) || "N/A");
+    const addressHeight = doc.heightOfString(addressText, { width: contentWidth - 24 });
+    const boxHeight = addressHeight + 10 + (16 * 4) + 10;
+    doc.rect(leftMargin, boxTop, contentWidth, boxHeight).strokeColor(LIGHT_BORDER).lineWidth(1).stroke();
+    doc.text(addressText, leftMargin + 12, boxTop + 10, { width: contentWidth - 24 });
+    let fieldY = boxTop + 10 + addressHeight + 6;
+    doc.text("Country: " + (sanitizeText(data?.administrative?.country) || "N/A"), leftMargin + 12, fieldY); fieldY += 16;
+    doc.text("State: " + (sanitizeText(data?.administrative?.state) || "N/A"), leftMargin + 12, fieldY); fieldY += 16;
+    doc.text("Local Govt / Area Council: " + (sanitizeText(data?.administrative?.suburb) || "N/A"), leftMargin + 12, fieldY); fieldY += 16;
+    doc.text("Plus Code: " + (sanitizeText(data?.plusCode) || "N/A"), leftMargin + 12, fieldY); fieldY += 16;
+    doc.y = boxTop + boxHeight + 16;
     doc.x = leftMargin;
 
     doc.fontSize(12).fillColor(NAVY).font("Inter-Bold").text("Structure Verification", leftMargin, doc.y);
