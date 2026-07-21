@@ -756,6 +756,35 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
       doc.moveDown(0.4);
     }
 
+    if (doc.y > pageHeight - 200) doc.addPage();
+    doc.fontSize(12).fillColor(NAVY).font("Inter-Bold").text("Confidence & Timezone", leftMargin, doc.y);
+    doc.moveDown(0.2);
+    doc.fontSize(9).fillColor("#333").font("Inter").text(
+      "Confidence Score: " + (data?.confidenceScore != null ? data.confidenceScore + "/99" : "N/A") +
+      "   Timezone: " + (sanitizeText(data?.timezone) || "N/A"),
+      leftMargin, doc.y, { width: contentWidth }
+    );
+    if (data?.sunTimes) {
+      doc.text("Sunrise: " + (sanitizeText(data.sunTimes.sunrise) || "N/A") + "   Sunset: " + (sanitizeText(data.sunTimes.sunset) || "N/A"), leftMargin, doc.y, { width: contentWidth });
+    }
+    doc.moveDown(0.5);
+
+    if (data?.nearbyCategorized) {
+      if (doc.y > pageHeight - 200) doc.addPage();
+      doc.fontSize(12).fillColor(NAVY).font("Inter-Bold").text("Nearby Amenities", leftMargin, doc.y);
+      doc.moveDown(0.2);
+      doc.font("Inter").fillColor("#333").fontSize(9);
+      const catLabels: Record<string, string> = { roads: "Roads", hospitals: "Hospitals", schools: "Schools", railStations: "Rail Stations", airports: "Airports", banks: "Banks", atms: "ATMs" };
+      Object.keys(catLabels).forEach((k) => {
+        const items = (data.nearbyCategorized as any)[k] || [];
+        if (items.length) {
+          const line = catLabels[k] + ": " + items.slice(0, 5).map((it: any) => (sanitizeText(it.name) || "Unnamed") + " (" + it.distanceMeters + "m)").join(", ");
+          doc.text(line, leftMargin, doc.y, { width: contentWidth });
+        }
+      });
+      doc.moveDown(0.4);
+    }
+
     doc.fontSize(8).fillColor("#888").font("Inter").text("Scan time: " + scanTime, leftMargin, doc.y);
     doc.moveDown(0.8);
     if (doc.y > pageHeight - 180) doc.addPage();
