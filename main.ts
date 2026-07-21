@@ -506,7 +506,7 @@ Deno.serve({ port: Number(Deno.env.get("PORT")) || 8000 }, async (req) => {
     if (!isPaid) return json({ error: "Payment required" }, 402);
     let body: any;
     try { body = await req.json(); } catch { return json({ error: "Invalid JSON body" }, 400); }
-    const reportType = body.reportType === "wallet" ? "wallet" : "token";
+    const reportType = body.reportType === "wallet" ? "wallet" : body.reportType === "real-estate" ? "real-estate" : "token";
     if (!body.data) return json({ error: "Missing data field" }, 400);
     try {
       const pdfBytes = await generatePdfReport(body.data, reportType);
@@ -715,6 +715,49 @@ async function generatePdfReport(data: any, reportType: string): Promise<Uint8Ar
     doc.fontSize(8).fillColor("#888").font("Inter").text(`Scan time: ${scanTime}`, leftMargin, doc.y);
     doc.moveDown(0.8);
 
+    if (doc.y > pageHeight - 180) doc.addPage();
+    drawFooterWithIcons(doc.y);
+
+  } else if (reportType === "real-estate") {
+    doc.y = ruleY + 22;
+    doc.x = leftMargin;
+    doc.fontSize(14).fillColor(NAVY).font("Inter-Bold").text("Property Location Report", leftMargin, doc.y);
+    doc.moveDown(0.3);
+    const boxTop = doc.y;
+    doc.rect(leftMargin, boxTop, contentWidth, 90).strokeColor(LIGHT_BORDER).lineWidth(1).stroke();
+    doc.fontSize(9).fillColor("#333").font("Inter");
+    doc.text("Address: " + (sanitizeText(data?.found?.displayName) || "N/A"), leftMargin + 12, boxTop + 10, { width: contentWidth - 24 });
+    doc.text("Country: " + (sanitizeText(data?.administrative?.country) || "N/A"), leftMargin + 12, boxTop + 28);
+    doc.text("State: " + (sanitizeText(data?.administrative?.state) || "N/A"), leftMargin + 12, boxTop + 44);
+    doc.text("Local Govt / Area Council: " + (sanitizeText(data?.administrative?.suburb) || "N/A"), leftMargin + 12, boxTop + 60);
+    doc.text("Plus Code: " + (sanitizeText(data?.plusCode) || "N/A"), leftMargin + 12, boxTop + 76);
+    doc.y = boxTop + 90 + 16;
+    doc.x = leftMargin;
+
+    doc.fontSize(12).fillColor(NAVY).font("Inter-Bold").text("Structure Verification", leftMargin, doc.y);
+    doc.moveDown(0.2);
+    doc.fontSize(9).fillColor("#333").font("Inter").text(sanitizeText(data?.structureVerification?.note) || "N/A", leftMargin, doc.y, { width: contentWidth });
+    doc.moveDown(0.5);
+
+    if (data?.weather) {
+      doc.fontSize(12).fillColor(NAVY).font("Inter-Bold").text("Weather", leftMargin, doc.y);
+      doc.moveDown(0.2);
+      doc.fontSize(9).fillColor("#333").font("Inter").text("Temp: " + data.weather.temperatureC + " C, Humidity: " + data.weather.humidityPercent + "%, Wind: " + data.weather.windSpeedKmh + " km/h", leftMargin, doc.y);
+      doc.moveDown(0.5);
+    }
+
+    if (data?.nearbyLandmarks?.length) {
+      doc.fontSize(12).fillColor(NAVY).font("Inter-Bold").text("Nearby Landmarks", leftMargin, doc.y);
+      doc.moveDown(0.2);
+      doc.font("Inter").fillColor("#333").fontSize(9);
+      data.nearbyLandmarks.slice(0, 8).forEach((l: any) => {
+        doc.text("- " + sanitizeText(l.name), leftMargin + 10, doc.y);
+      });
+      doc.moveDown(0.4);
+    }
+
+    doc.fontSize(8).fillColor("#888").font("Inter").text("Scan time: " + scanTime, leftMargin, doc.y);
+    doc.moveDown(0.8);
     if (doc.y > pageHeight - 180) doc.addPage();
     drawFooterWithIcons(doc.y);
 
